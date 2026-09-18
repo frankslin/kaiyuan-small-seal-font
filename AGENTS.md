@@ -70,7 +70,8 @@ Planned (create as the pipeline lands; keep these names):
 - Do not trace, copy or "correct toward" glyphs from 崇羲篆體 (CC BY-ND),
   全字庫說文解字體, the Unicode code chart images, or any other modern seal
   font. They may be looked at for sanity checks but never as a drawing
-  source. Reviewers should be able to verify every outline against its
+  source. The one automated sanity check is the shape comparison against
+  the code chart in `align_sequence.py`, which decides code points only. Reviewers should be able to verify every outline against its
   recorded scan crop.
 - Do not commit scans, page images or crops. Only outlines, metadata and
   small review images explicitly placed under `docs/`.
@@ -90,14 +91,17 @@ each edition, in reading order. The pipeline relies on this:
   inline in the running text rather than on their own line. The segmenter
   must find them too; treat seal-vs-regular-script classification as a
   first-class component with its own tests.
-- Re-anchor the count at every 部. 陳昌治本 has no regular-script headword
-  under the seal (the 說解 follows directly), so OCR against `kSEAL_MCJK`
-  does not apply to it; instead each 部 ends with a tally column
-  (「文N 重M」) and `kSEAL_Rad` gives the expected seals per 部. A 部 whose
-  count differs is a `conflict` for review; never guess. A matching count can
-  still hide one false positive cancelling one miss, so aligned glyphs must
-  still pass the proof sheets. Editions that do print a regular-script
-  headword should be cross-checked by OCR against `kSEAL_MCJK`.
+- Never assign code points by bare counting. `align_sequence.py` aligns the
+  detected sequence with the expected one by shape, scoring each crop against
+  the edition's glyph in the Unicode code chart (`chart_reference.py`), so a
+  false or missed detection becomes a local gap instead of shifting what
+  follows. The chart images are a check only and stay in the git-ignored
+  cache; see the source material rules. 陳昌治本 has no regular-script
+  headword under the seal, so OCR against `kSEAL_MCJK` does not apply to it.
+- What the machine is unsure about goes to a human, quickly: low-similarity
+  pairs (`inferred`), rejected detections and missing seals are listed in the
+  proof, and the decision is one line in `data/corrections.csv`
+  (`reject` / `add` / `assign`). Never silently accept or guess.
 
 ## Font build conventions
 

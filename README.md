@@ -33,13 +33,13 @@ summary at the end.
 | --- | --- | --- |
 | 取頁 | `scripts/fetch_pages.py` | 依 manifest 下載 Commons 頁面縮圖到 `sources/cache/`（不提交） |
 | 切字 | `scripts/segment_pages.py` | 每頁的篆字裁切框與閱讀順序 |
-| 對位 | `scripts/align_sequence.py` | 切片 → 流水號 → 碼位；以每部末的計數欄逐部核對篆字數，不符者進審核清單 |
+| 對位 | `scripts/chart_reference.py`、`scripts/align_sequence.py` | 切片 → 流水號 → 碼位；以 Unicode 碼表中該版本的字形做形狀比對的序列對齊（碼表只用於核對，不作描繪來源），拿不準的進審核清單 |
 | 向量化 | `scripts/trace_glyphs.py` | `glyphs/uXXXXX.svg`，統一 1000 UPM、置中 |
 | 建字型 | `scripts/build_font.py` | `build/` 下的 TTF／OTF，cmap format 12 |
 | 校樣 | `scripts/proof_sheets.py` | `build/proof/index.html`：字型渲染、原切片、楷書並排，附待審清單 |
 | 驗證 | `scripts/verify_seal_sources.py`（已有） | 檢查 vendored 資料完整性 |
 
-人工修正放在 `data/overrides/`（逐字 SVG）與 `data/corrections.csv`（裁切框或對位修正），建置時覆蓋自動結果。
+人工修正放在 `data/overrides/`（逐字 SVG）與 `data/corrections.csv`（每行一個決定：`reject` 剔除誤判框、`add` 補入漏切的字、`assign` 指定碼位），重跑時自動套用。校樣頁會列出機器拿不準的項目與可直接抄用的座標。
 
 跑一遍（需能連上 Wikimedia Commons）：
 
@@ -47,6 +47,7 @@ summary at the end.
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 python3 scripts/fetch_pages.py --edition ccz      # 依 manifest 抓頁面到 sources/cache/
 python3 scripts/segment_pages.py --edition ccz    # 切字，輸出 build/pages/
+python3 scripts/chart_reference.py --edition ccz  # 從 Unicode 碼表取比對用參考圖（只存快取）
 python3 scripts/align_sequence.py --edition ccz   # 對位，輸出 data/provenance/glyphs.csv
 python3 scripts/trace_glyphs.py                   # 向量化，輸出 glyphs/
 python3 scripts/build_font.py                     # 建字型，輸出 build/*.ttf、*.otf
@@ -92,7 +93,7 @@ verification script exist, the fonts do not yet.
 
 - [x] 项目初始化、文档与技术路线
 - [x] Manifest 填入 Wikimedia Commons 文件名（陈昌治本十册已选定；卷一、卷二页码已核定）
-- [x] 第一份扫描成功切字和对位（卷一：一、丄、屮、艸等部计数吻合；其余部待审）
+- [x] 第一份扫描成功切字和对位（卷一 783 字中 732 字高信心对位，其余列入人工审核清单）
 - [x] 字型端到端build成功（卷一已对位部分，TTF/OTF 主字型与相容版）
 - [ ] 陈昌治本全书切字对位、审核清单清零
 - [ ] v0.1 发布

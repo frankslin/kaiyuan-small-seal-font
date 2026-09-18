@@ -12,3 +12,4 @@ pytesseract>=0.3.10
 fonttools[ufo,unicode]>=4.50
 ufoLib2>=0.16
 fontmake>=3.8
+PyMuPDF>=1.24      # chart_reference.py only: renders the Unicode code chart

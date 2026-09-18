@@ -324,6 +324,24 @@ def stroke_stats(patch):
 N_EXTRA = 13
 
 
+def is_small_print(mask, slot):
+    """Double-row small print (反切, 校語): a blank strip runs down the middle
+    of the box and each side holds several short components. Seals with an
+    open middle (八, 門, left-right compounds) have tall ones."""
+    h, w = mask.shape
+    strip = mask[:, w // 2 - 4:w // 2 + 5]
+    best = max(range(strip.shape[1]), key=lambda k: -strip[:, k].sum())
+    if strip[:, best].mean() > 0.04:
+        return False
+    sides, tallest = [], 0
+    for part in (mask[:, :w // 2], mask[:, w // 2:]):
+        count, _, stats, _ = cv2.connectedComponentsWithStats(part.astype(np.uint8), connectivity=8)
+        real = [i for i in range(1, count) if stats[i, cv2.CC_STAT_AREA] >= 6]
+        sides.append(len(real))
+        tallest = max([tallest] + [stats[i, cv2.CC_STAT_HEIGHT] for i in real])
+    return min(sides) >= 2 and sum(sides) >= 6 and tallest < slot * 0.65  # a small character is half a slot
+
+
 def features(gray, bw, col, slot, y0, y1, is_head=False):
     """(HOG + structural features, tight ink box) of a window, or (None, None).
 
@@ -341,6 +359,8 @@ def features(gray, bw, col, slot, y0, y1, is_head=False):
     mask = bw[by0:by1, bx0:bx1] > 0
     # narrow boxes are rule remnants, except for a headword such as 丨
     if height < slot * 0.9 or (width < column_width * 0.3 and not is_head) or mask.mean() < 0.05:
+        return None, None
+    if not is_head and is_small_print(mask, slot):
         return None, None
     patch = gray[by0:by1, bx0:bx1]
     # pad to the 3:4 classifier aspect so that shapes are not distorted
@@ -398,7 +418,7 @@ class SealClassifier:
 def manifest_blocks(manifest, edition, juan):
     for entry in manifest["editions"][edition].get("files") or []:
         for block in entry.get("pages") or []:
-            if juan and block.get("juan") != juan:
+            if juan and block.get("juan") not in juan.split(","):
                 continue
             yield entry, block
 
@@ -463,14 +483,32 @@ def training_set(halves, verified):
                 if vec is not None:
                     X.append(vec)
                     y.append(0)
-    print(f"{n_verified} training windows from verified 部, {len(y) - n_verified} from the layout")
+    # Slots 2 to 5 hold large characters only, so the layout labels above lack
+    # double-row small print (反切, 校語). Windows that a strict rule is sure
+    # about supply it; the model then handles the touching, messier cases.
+    n_layout = len(y)
+    for st in halves.values():
+        geometry = st["geometry"]
+        top, bottom, slot = geometry["top"], geometry["bottom"], geometry["slot"]
+        for col in st["cols"]:
+            for window in candidates(col, top, bottom, slot, st["bw"]):
+                box = ink_box(st["bw"], col["x0"], col["x1"], *window)
+                if box is None or box[3] - box[1] < slot * 0.9:
+                    continue
+                if is_small_print(st["bw"][box[1]:box[3], box[0]:box[2]] > 0, slot):
+                    vec, _ = features(st["gray"], st["bw"], col, slot, *window, is_head=True)
+                    if vec is not None:
+                        X.append(vec)
+                        y.append(0)
+    print(f"{len(y) - n_layout} small-print windows added as negatives")
+    print(f"{n_verified} training windows from verified 部, {n_layout - n_verified} from the layout")
     return np.array(X), np.array(y)
 
 
 def detect(st, model, threshold):
     geometry = st["geometry"]
     top, bottom, slot = geometry["top"], geometry["bottom"], geometry["slot"]
-    seals = []
+    seals, maybes = [], []
     for col in st["cols"]:
         scored = []
         windows = candidates(col, top, bottom, slot, st["bw"])
@@ -488,6 +526,8 @@ def detect(st, model, threshold):
             # evidence; flush-top regular script (卷 titles) still scores ~0.
             if score >= (0.1 if is_head else threshold):
                 scored.append((score, window, box, is_head))
+            elif score >= 0.15:
+                maybes.append((score, window, box, col["column"]))
         flat = flat_headword(col, top, slot)
         if flat:
             box = ink_box(st["bw"], col["x0"], col["x1"], *flat)
@@ -504,6 +544,15 @@ def detect(st, model, threshold):
             st.setdefault("rejected_heads", []).append(col["column"])
     for k, seal in enumerate(seals, 1):
         seal["order"] = k
+    # near misses, for the review queue: best-scoring first, without duplicates
+    taken = [(s["column"], (s["box"][1], s["box"][3])) for s in seals]
+    near = []
+    for score, window, box, column in sorted(maybes, key=lambda t: -t[0]):
+        span = (box[1], box[3])
+        if all(c != column or overlap(span, other) <= 0.25 for c, other in taken):
+            taken.append((column, span))
+            near.append({"column": column, "box": box, "score": round(score, 3)})
+    st["near_misses"] = near
     return seals
 
 
@@ -523,7 +572,7 @@ def draw_overlay(st, seals, path):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--edition", default="ccz")
-    parser.add_argument("--juan", help="only this 卷 (as named in the manifest)")
+    parser.add_argument("--juan", help="only these 卷 (as named in the manifest, comma-separated)")
     parser.add_argument("--overlay", action="store_true", help="write review overlays next to the JSON")
     parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--no-feedback", action="store_true",
@@ -582,7 +631,7 @@ def main(argv):
             "render_width": st["width"], "halves": []})
         record["halves"].append({"side": side, "juan": st["juan"], "geometry": st["geometry"],
                                  "columns": [{k: v for k, v in c.items() if k not in ("head", "side")} for c in st["cols"]],
-                                 "seals": seals, "seal_count": len(seals)})
+                                 "seals": seals, "seal_count": len(seals), "near_misses": st["near_misses"]})
         out_dir = BUILD / "pages" / args.edition / slug
         out_dir.mkdir(parents=True, exist_ok=True)
         if args.overlay:

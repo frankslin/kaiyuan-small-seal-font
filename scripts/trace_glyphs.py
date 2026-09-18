@@ -33,6 +33,7 @@ GLYPHS = ROOT / "glyphs"
 TRACE_HEIGHT = 600          # pixels the crop is enlarged to before thresholding
 MARGIN = 8                  # source pixels kept around the crop box
 MAX_FACTOR = 8.0
+TRACED = ("aligned", "inferred", "manual")  # statuses that carry a code point
 ASCENDER, DESCENDER = 880, -120
 GLYPH_HEIGHT, GLYPH_MAX_WIDTH = 760, 760
 CENTRE_X, CENTRE_Y = 500, 380
@@ -48,6 +49,23 @@ def half_leaf(edition, title, page, width, crop_x0, crop_x1, rotation):
     return rotate(half, rotation) if abs(rotation) > 0.05 else half
 
 
+def frame_remnants(ink, box_top, frame_top, pitch):
+    """Boxes (x0, y0, x1, y1, in crop pixels) of top frame line remnants.
+
+    A headword sits right under the top frame line, and where the line sags
+    a sliver of it ends up inside the crop. Unlike the top stroke of a seal
+    (王, 示), the sliver lies within a few pixels of the frame and spans the
+    whole column.
+    """
+    found = []
+    count, _, stats, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8), connectivity=8)
+    for i in range(1, count):
+        x, y, w, h = stats[i, :4]
+        if box_top + y <= frame_top + 8 and h <= 10 and w >= pitch - 16:
+            found.append((int(x), int(y), int(x + w), int(y + h)))
+    return found
+
+
 def crop_mask(row):
     """Binary mask of the seal, enlarged, and the enlargement factor."""
     half = half_leaf(row["edition"], row["commons_title"], int(row["page"]), int(row["render_width"]),
@@ -59,6 +77,10 @@ def crop_mask(row):
     big = cv2.resize(crop, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
     big = cv2.GaussianBlur(big, (0, 0), factor * 0.35)
     _, mask = cv2.threshold(big, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    if row.get("frame_top"):
+        _, small = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        for fx0, fy0, fx1, fy1 in frame_remnants(small > 0, y0, int(row["frame_top"]), float(row["pitch"])):
+            mask[int((fy0 - 1) * factor):int((fy1 + 1) * factor), int(fx0 * factor):int(fx1 * factor)] = 0
     # stroke width from the distance transform; specks are small against it
     distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
     stroke = 2 * float(np.median(distance[distance > 0.5 * distance.max()])) if distance.max() > 0 else 1.0
@@ -98,7 +120,7 @@ def main(argv):
     only = {c.strip().upper() for c in args.only.split(",")} if args.only else None
 
     with PROVENANCE.open(encoding="utf-8", newline="") as fh:
-        rows = [r for r in csv.DictReader(fh) if r["status"] == "aligned" and (not only or r["codepoint"] in only)]
+        rows = [r for r in csv.DictReader(fh) if r["status"] in TRACED and (not only or r["codepoint"] in only)]
     rows.sort(key=lambda r: (r["commons_title"], int(r["page"]), r["side"]))
     GLYPHS.mkdir(exist_ok=True)
     written = 0
