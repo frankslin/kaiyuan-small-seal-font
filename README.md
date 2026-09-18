@@ -75,3 +75,11 @@ scripted, with human corrections kept as override files. Fonts will be
 released under the SIL OFL 1.1; the vendored Unicode data is under the
 Unicode License v3. The project is at an early stage: the mapping data and a
 verification script exist, the fonts do not yet.
+
+## 开发状态
+
+- [x] 项目初始化、文档与技术路线
+- [ ] Manifest 填入 Wikimedia Commons 文件名  
+- [ ] 第一份扫描成功切字和对位
+- [ ] 字型端到端build成功
+- [ ] v0.1 发布
