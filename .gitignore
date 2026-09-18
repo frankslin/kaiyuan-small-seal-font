@@ -1,0 +1,8 @@
+# Downloaded scans and page images are never committed; see sources/manifest.yaml
+sources/cache/
+build/
+dist/
+*.pyc
+__pycache__/
+.venv/
+.DS_Store
