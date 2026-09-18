@@ -19,7 +19,8 @@ Human decisions go in data/corrections.csv with the header
 `action,edition,commons_title,page,side,x,y,w,h,codepoint,reason`; boxes are
 in deskewed half-leaf coordinates, as printed in the proof. `reject` drops the
 detection overlapping the box, `add` inserts a missed seal, `assign` (or `add`
-with a code point) pins a box to a code point.
+with a code point) pins a box to a code point. (`keep-lines` rows are read by
+trace_glyphs.py.)
 
 Without the chart reference the script falls back to counting per 部 between
 the tally columns (「文N 重M」); a matching count can hide one false detection
@@ -41,7 +42,7 @@ import yaml
 
 from chart_reference import SIZE, normalise, reference_path
 from fetch_pages import MANIFEST, ROOT, slugify
-from segment_pages import BUILD, binarize, manifest_blocks
+from segment_pages import BUILD, binarize, blank_frame_rows, manifest_blocks
 from trace_glyphs import frame_remnants, half_leaf
 
 SEAL_SOURCES = ROOT / "third_party" / "unicode" / "ucd" / "SealSources.txt"
@@ -49,9 +50,12 @@ PROVENANCE = ROOT / "data" / "provenance" / "glyphs.csv"
 CORRECTIONS = ROOT / "data" / "corrections.csv"
 FIELDS = ["codepoint", "edition", "sequence", "commons_title", "page", "side", "rotation", "crop_x0", "crop_x1",
           "x", "y", "w", "h", "render_width", "frame_top", "pitch", "kind", "score", "juan", "radical", "similarity", "status"]
-MATCH_FLOOR = 0.3   # similarity below which pairing two shapes costs more than it gains
-GAP = -0.12         # cost of an unmatched detection or an unmatched expected seal
-CONFIDENT = 0.5     # similarity from which a pair is `aligned` rather than `inferred`
+MATCH_FLOOR = 0.5   # similarity below which pairing two shapes costs more than it gains
+GAP = -0.05         # two gaps beat a pair whose similarity is under MATCH_FLOOR - 0.1
+CONFIDENT = 0.65    # similarity from which a pair is `aligned` rather than `inferred`
+CONFIDENT_INLINE = 0.78  # the same for inline detections, which regular script can mimic
+REFINE_BELOW = 0.8  # pairs matching worse than this get their crop box re-fitted
+RECOVER_FROM = 0.85 # similarity a searched-for missing seal must reach to be added
 TALLY_INDENT = 2.5  # slots; 說解 continuation is indented 1, 新附 seals 2
 
 
@@ -121,7 +125,7 @@ def apply_corrections(half, fixes, used):
     return seals
 
 
-def detected_stream(edition, entry, block, corrections, used):
+def detected_stream(edition, entry, block, corrections, used, halves=None):
     """Seals and tally markers of one 卷 in reading order."""
     slug = slugify(entry["commons_title"])
     stream = []
@@ -134,6 +138,8 @@ def detected_stream(edition, entry, block, corrections, used):
             if half["juan"] != block["juan"]:
                 continue
             geometry = half["geometry"]
+            if halves is not None:
+                halves[(page, half["side"])] = {**half, "render_width": record["render_width"]}
             seals = defaultdict(list)
             fixes = corrections.get((entry["commons_title"], page, half["side"]), [])
             for seal in apply_corrections(half, fixes, used):
@@ -200,9 +206,100 @@ def shape_vectors(edition, entry, seals):
         ink = masks[key][y0:y1, x0:x1] > 0
         for fx0, fy0, fx1, fy1 in frame_remnants(ink, y0, geometry["top"], geometry["pitch"]):
             ink[fy0:fy1, fx0:fx1] = False
+        if y0 <= geometry["top"] + 3:  # the box touches the frame: a sagging piece of it is inside
+            strip = ink.astype(np.uint8)
+            blank_frame_rows(strip, reach=20)
+            ink = strip > 0
         vector = normalise(ink)
         vectors.append(vector if vector is not None else np.zeros(SIZE[0] * SIZE[1], np.float32))
     return np.array(vectors)
+
+
+def refine_box(edition, entry, seal, target):
+    """Slide and resize a poorly matching box vertically for the best match.
+
+    A seal that touches the small print above it is found by a sliding
+    window, which may sit a fraction of a slot off and take in part of the
+    neighbour. The chart glyph only picks where to cut; the outline still
+    comes from the scan. Returns (box, similarity).
+    """
+    geometry = seal["geometry"]
+    half = half_leaf(edition, entry["commons_title"], seal["page"], seal["render_width"],
+                     geometry["crop_x"][0], geometry["crop_x"][1], geometry["rotation"])
+    x0, y0, x1, y1 = seal["box"]
+    reach = int(geometry["slot"] * 0.6)
+    top, bottom = max(0, y0 - reach), min(half.shape[0], y1 + reach)
+    mask = binarize(half, strict=True)[top:bottom, x0:x1] > 0
+    best = (None, -1.0)
+    for a in range(0, mask.shape[0] - 20, 3):
+        for b in range(a + int(geometry["slot"] * 1.2), min(mask.shape[0], a + int(geometry["slot"] * 2.3)) + 1, 3):
+            window = mask[a:b]
+            rows = np.where(window.any(1))[0]
+            vector = normalise(window) if len(rows) else None
+            if vector is None:
+                continue
+            similarity = float(shifted_similarity(vector[None], target[None], reach=1)[0, 0])
+            if similarity > best[1]:
+                cols = np.where(window.any(0))[0]
+                best = ([x0 + int(cols[0]), top + a + int(rows[0]), x0 + int(cols[-1]) + 1, top + a + int(rows[-1]) + 1], similarity)
+    return best
+
+
+def best_window(mask, slot, target, step=3):
+    """Best matching two-slot-ish window of a column strip: (y0, y1, similarity)."""
+    best = (0, 0, -1.0)
+    for a in range(0, max(1, mask.shape[0] - int(slot)), step):
+        for b in range(a + int(slot * 1.2), min(mask.shape[0], a + int(slot * 2.3)) + 1, step):
+            window = mask[a:b]
+            rows = np.where(window.any(1))[0]
+            # a speck scales up to anything; a seal fills most of its two slots
+            if len(rows) == 0 or rows[-1] - rows[0] < slot * 0.9 or window.mean() < 0.05:
+                continue
+            vector = normalise(window)
+            if vector is None:
+                continue
+            similarity = float(shifted_similarity(vector[None], target[None], reach=1)[0, 0])
+            if similarity > best[2]:
+                best = (a + int(rows[0]), a + int(rows[-1]) + 1, similarity)
+    return best
+
+
+def search_missing(edition, entry, halves, previous, following, target):
+    """Look for a seal nobody detected, between its aligned neighbours.
+
+    Walks the columns from the seal before to the seal after in reading
+    order and returns the best matching window as a seal dict, or None.
+    """
+    order = [(key, column) for key, half in halves.items() for column in half["columns"]]
+    position = {(key, column["column"]): n for n, (key, column) in enumerate(order)}
+    start = position.get(((previous["page"], previous["side"]), previous["column"]), 0) if previous else 0
+    stop = position.get(((following["page"], following["side"]), following["column"]), len(order) - 1) if following else len(order) - 1
+    if stop - start > 12:
+        return None  # too far apart to search blindly
+    best = None
+    for key, column in order[start:stop + 1]:
+        half = halves[key]
+        geometry = half["geometry"]
+        image = half_leaf(edition, entry["commons_title"], key[0], half["render_width"],
+                          geometry["crop_x"][0], geometry["crop_x"][1], geometry["rotation"])
+        y_lo, y_hi = geometry["top"], geometry["bottom"]
+        if previous and (key, column["column"]) == ((previous["page"], previous["side"]), previous["column"]):
+            y_lo = previous["box"][3]
+        if following and (key, column["column"]) == ((following["page"], following["side"]), following["column"]):
+            y_hi = following["box"][1]
+        if y_hi - y_lo < geometry["slot"]:
+            continue
+        strip = (binarize(image, strict=True)[geometry["top"]:geometry["bottom"], column["x0"]:column["x1"]] > 0).astype(np.uint8)
+        blank_frame_rows(strip)
+        mask = strip[y_lo - geometry["top"]:y_hi - geometry["top"]] > 0
+        y0, y1, similarity = best_window(mask, geometry["slot"], target)
+        if similarity > (best["similarity"] if best else RECOVER_FROM):
+            cols = np.where(mask[y0:y1].any(0))[0]
+            best = {"type": "seal", "page": key[0], "side": key[1], "geometry": geometry,
+                    "render_width": half["render_width"], "column": column["column"], "kind": "recovered",
+                    "score": 0.0, "similarity": similarity,
+                    "box": [column["x0"] + int(cols[0]), y_lo + y0, column["x0"] + int(cols[-1]) + 1, y_lo + y1]}
+    return best
 
 
 def shifted_similarity(detected, wanted, reach=2):
@@ -293,7 +390,8 @@ def main(argv):
     rows, report, done_juan, verified, review = [], [], set(), [], []
     corrections, used = load_corrections(args.edition), set()
     for entry, block in manifest_blocks(manifest, args.edition, args.juan):
-        stream = detected_stream(args.edition, entry, block, corrections, used)
+        halves = {}
+        stream = detected_stream(args.edition, entry, block, corrections, used, halves)
         if not stream:
             print(f"{block['juan']}: no segmentation output yet, skipped", file=sys.stderr)
             continue
@@ -311,24 +409,68 @@ def main(argv):
             forced = {i: index_of[seal["assign"]] for i, seal in enumerate(seals) if seal.get("assign") in index_of}
             pairs, extra, missing = align_shapes(similarity.copy(), forced)
             counts = defaultdict(int)
+            paired = {j: i for i, j in pairs}
             for i, j in pairs:
                 sequence, cp, radical = wanted[j]
                 sim = float(similarity[i, j])
-                status = "manual" if i in forced else "aligned" if sim >= CONFIDENT else "inferred"
+                if sim < REFINE_BELOW and sequence in reference and seals[i]["kind"] != "manual":
+                    box, better = refine_box(args.edition, entry, seals[i], reference[sequence])
+                    if box is not None and better > sim + 0.05:
+                        seals[i] = {**seals[i], "box": box}
+                        sim = better
+                        counts["refined"] += 1
+                # a headword is backed by the layout; an inline detection is not
+                confident = CONFIDENT if seals[i]["kind"] == "headword" else CONFIDENT_INLINE
+                if sim < confident and i not in forced and sequence in reference:
+                    # probably paired with a false detection: look for the real seal nearby
+                    previous = max((k for k in paired if k < j), default=None)
+                    later = min((k for k in paired if k > j), default=None)
+                    found = search_missing(args.edition, entry, halves,
+                                           seals[paired[previous]] if previous is not None else None,
+                                           seals[paired[later]] if later is not None else None, reference[sequence])
+                    if found and found["similarity"] > sim:
+                        rows.append(provenance_row(args.edition, entry, block, seals[i], "rejected"))
+                        seals[i], sim, confident = found, found["similarity"], RECOVER_FROM
+                        counts["replaced"] += 1
+                status = "manual" if i in forced else "aligned" if sim >= confident else "inferred"
                 counts[status] += 1
                 rows.append(provenance_row(args.edition, entry, block, seals[i], status, prefix, sequence, cp, radical, round(sim, 3)))
+            # A headword sandwiched between confidently aligned neighbours is
+            # vouched for by its position; dense glyphs often match only so-so.
+            mine = [r for r in rows if r["juan"] == block["juan"] and r["sequence"]]
+            mine.sort(key=lambda r: r["sequence"])
+            for before_row, row, after_row in zip(mine, mine[1:], mine[2:]):
+                if (row["status"] == "inferred" and row["kind"] == "headword" and float(row["similarity"]) >= 0.5
+                        and before_row["status"] in ("aligned", "manual") and after_row["status"] in ("aligned", "manual")
+                        and before_row.get("promoted") is None and after_row.get("promoted") is None):
+                    row["status"], row["promoted"] = "aligned", True
+                    counts["promoted"] += 1
+            for row in mine:
+                row.pop("promoted", None)
+            counts["inferred"] -= counts["promoted"]
+            counts["aligned"] += counts["promoted"]
             for i in extra:
                 rows.append(provenance_row(args.edition, entry, block, seals[i], "rejected"))
             before = {j: i for i, j in pairs}
             for j in missing:
                 sequence, cp, radical = wanted[j]
                 previous = max((k for k in before if k < j), default=None)
+                later = min((k for k in before if k > j), default=None)
                 near = seals[before[previous]] if previous is not None else None
+                if sequence in reference:
+                    found = search_missing(args.edition, entry, halves, near,
+                                           seals[before[later]] if later is not None else None, reference[sequence])
+                    if found:
+                        counts["recovered"] += 1
+                        rows.append(provenance_row(args.edition, entry, block, found, "aligned", prefix, sequence, cp,
+                                                   radical, round(found["similarity"], 3)))
+                        continue
                 review.append({"juan": block["juan"], "codepoint": f"{cp:05X}", "sequence": f"{prefix}{sequence:05d}",
                                "after": {"page": near["page"], "side": near["side"], "box": near["box"],
                                          "codepoint": f"{wanted[previous][1]:05X}"} if near else None})
             report.append(f"  shape alignment: {counts['aligned']} aligned, {counts['inferred']} inferred (low similarity, "
-                          f"check in proof), {counts['manual']} manual, {len(extra)} detections rejected, {len(missing)} seals missing")
+                          f"check in proof), {counts['manual']} manual, {counts['refined']} boxes re-fitted, {len(extra)} detections rejected, "
+                          f"{counts['replaced']} false detections replaced and {counts['recovered']} missed seals recovered by search, {len(missing) - counts['recovered']} still missing")
             for item in review:
                 if item["juan"] == block["juan"]:
                     after = item["after"]

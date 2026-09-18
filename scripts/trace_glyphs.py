@@ -33,7 +33,7 @@ GLYPHS = ROOT / "glyphs"
 TRACE_HEIGHT = 600          # pixels the crop is enlarged to before thresholding
 MARGIN = 8                  # source pixels kept around the crop box
 MAX_FACTOR = 8.0
-TRACED = ("aligned", "inferred", "manual")  # statuses that carry a code point
+TRACED = ("aligned", "manual")  # `inferred` pairs wait for a human decision
 ASCENDER, DESCENDER = 880, -120
 GLYPH_HEIGHT, GLYPH_MAX_WIDTH = 760, 760
 CENTRE_X, CENTRE_Y = 500, 380
@@ -66,6 +66,16 @@ def frame_remnants(ink, box_top, frame_top, pitch):
     return found
 
 
+@lru_cache(maxsize=1)
+def keep_lines():
+    """Code points whose own strokes run through the crop (`keep-lines` in data/corrections.csv)."""
+    path = ROOT / "data" / "corrections.csv"
+    if not path.exists():
+        return frozenset()
+    with path.open(encoding="utf-8", newline="") as fh:
+        return frozenset(r["codepoint"].upper() for r in csv.DictReader(fh) if r["action"] == "keep-lines")
+
+
 def crop_mask(row):
     """Binary mask of the seal, enlarged, and the enlargement factor."""
     half = half_leaf(row["edition"], row["commons_title"], int(row["page"]), int(row["render_width"]),
@@ -81,6 +91,14 @@ def crop_mask(row):
         _, small = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         for fx0, fy0, fx1, fy1 in frame_remnants(small > 0, y0, int(row["frame_top"]), float(row["pitch"])):
             mask[int((fy0 - 1) * factor):int((fy1 + 1) * factor), int(fx0 * factor):int(fx1 * factor)] = 0
+    # Column rules and frame lines run through the crop from edge to edge;
+    # no seal stroke does, because of the margin kept around the box.
+    for horizontal in (() if row["codepoint"] in keep_lines() else (False, True)):
+        length = int((mask.shape[1] if horizontal else mask.shape[0]) * 0.95)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (length, 1) if horizontal else (1, length))
+        lines = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        if lines.any():
+            mask[cv2.dilate(lines, np.ones((5, 5), np.uint8)) > 0] = 0
     # stroke width from the distance transform; specks are small against it
     distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
     stroke = 2 * float(np.median(distance[distance > 0.5 * distance.max()])) if distance.max() > 0 else 1.0

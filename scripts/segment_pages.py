@@ -79,6 +79,9 @@ def frame_rows(bw):
     h, w = bw.shape
     profile = long_lines(bw, True, w // 6).sum(1) / 255
     found = [g for g in groups(profile, w * 0.25) if h * 0.03 < g[0] and g[1] < h * 0.97]
+    # the library watermark has faint horizontal edges; frame lines are far stronger
+    strongest = max((g[2] for g in found), default=0)
+    found = [g for g in found if g[2] >= strongest * 0.45]
     tops = [g for g in found if g[0] < h * 0.55]
     bottoms = [g for g in found if g[0] > h * 0.6]
     if not tops or not bottoms:
@@ -202,10 +205,33 @@ def column_runs(ink, min_rows=3):
     return [r for r in merged if r[1] - r[0] >= min_rows]
 
 
+def blank_frame_rows(ink, reach=30):
+    """Zero, in place, the rows of a column strip taken up by the frame lines.
+
+    A sagging frame line enters the strip at its very edge and fills whole
+    rows from there; the wide top stroke of a seal (王, 示) is separated from
+    the edge by blank rows and must stay.
+    """
+    fill = ink.mean(1)
+    k = 0
+    while k < reach and (fill[k] >= 0.7 or (k < 3 and fill[k + 1:k + 4].max() >= 0.7)):
+        k += 1
+    if k:
+        ink[:k + 1] = 0
+    k = 0
+    while k < reach and (fill[-1 - k] >= 0.7 or (k < 3 and fill[-4 - k:-1 - k].max() >= 0.7)):
+        k += 1
+    if k:
+        ink[len(ink) - k - 1:] = 0
+
+
 def clean_column(bw, x0, x1, top, bottom):
     """Column ink without rule remnants and specks."""
     inset = 5
     ink = (bw[top:bottom, x0 + inset:x1 - inset + 1] > 0).astype(np.uint8)
+    # The frame line sags where the page curves, so part of it may lie below
+    # `top` in this column: blank everything down to the last row it fills.
+    blank_frame_rows(ink)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     for i in range(1, count):
         x, y, cw, ch, area = stats[i]
@@ -605,6 +631,15 @@ def main(argv):
                                           "bw": bw, "geometry": geometry, "cols": cols}
     if not halves:
         print("no pages selected", file=sys.stderr)
+        return 1
+    # A wrong frame line (watermark edge, stain) halves the slot size and ruins
+    # the whole half-leaf without any other symptom, so check it outright.
+    heights = {key: st["geometry"]["bottom"] - st["geometry"]["top"] for key, st in halves.items()}
+    typical = float(np.median(list(heights.values())))
+    odd = [f"p{page:04d} {side} ({height} px)" for (_, page, side), height in heights.items()
+           if abs(height - typical) > typical * 0.04]
+    if odd:
+        print(f"frame height differs from the typical {typical:.0f} px: {', '.join(odd)}", file=sys.stderr)
         return 1
 
     verified = {}
