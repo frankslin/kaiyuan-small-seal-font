@@ -227,3 +227,94 @@ codepoint,action,edition,commons_title,page,x,y,w,h,reason
   Commons，尚未填入。
 - 腳本授權（傾向 MIT）與 OFL Reserved Font Name。
 - OCR 引擎（tesseract 最省事；PaddleOCR 對罕用字辨識率通常較高但依賴重）。
+
+## 附錄：SVG 平滑度優化
+
+掃描古籍木刻版的篆字輪廓往往有鋸齒感。以下是優化建議：
+
+### 問題根源
+
+1. 掃描影像邊界不夠清晰（木刻毛邊、紙張紋理）
+2. potrace 的角度平滑參數過於保守（`alphamax=1.0`）
+3. 路徑優化容差設定（`opttolerance=0.2`）可進一步調小
+
+### 改進方案（建議順序）
+
+#### 方案 A：調整 potrace 參數（首先嘗試）
+
+在 `scripts/trace_glyphs.py` 裡改：
+
+```python
+# 替換原有的 potrace 調用
+potrace_args = [
+    'potrace', input_png,
+    '-s',                      # SVG 輸出
+    '--alphamax', '1.5',       # 改從 1.0 → 1.5（平滑角度）
+    '--opttolerance', '0.2',   # 保持不變或改 0.15
+    '--turdsize', str(turd_size),
+    '-o', output_svg
+]
+subprocess.run(potrace_args, check=True)
+```
+
+**參數說明**：
+- `alphamax=1.0`：保守，保留細節但易有尖角（鋸齒感）
+- `alphamax=1.5`：**推薦**，平滑度與細節平衡
+- `alphamax=2.0–2.5`：高度平滑，但細節可能丟失
+
+#### 方案 B：提高輸入影像解析度
+
+```python
+# 在放大段改 600 → 800–1000
+target_height_px = 800  # 或 1000
+scale_factor = target_height_px / original_height
+enlarged = cv2.resize(
+    binary_crop, None,
+    fx=scale_factor, fy=scale_factor,
+    interpolation=cv2.INTER_CUBIC
+)
+```
+
+#### 方案 C：影像前處理優化
+
+加 morphological smoothing：
+
+```python
+# 在 Sauvola 二值化後加
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+```
+
+#### 方案 D：後處理平滑（fontTools）
+
+```python
+# 讀 SVG 後用 fontTools 路徑簡化
+from fontTools.svgLib.path import SVGPath
+from fontTools.misc.psCharStrings import T2CharString
+
+path = SVGPath.fromstring(svg_data)
+# 簡化並平滑
+simplified = path.simplify(tolerance=0.5)
+```
+
+### 推薦方案組合
+
+| 優先級 | 方案 | 成本 | 效果 |
+| --- | --- | --- | --- |
+| 1️⃣ | A（alphamax 1.5） | 改一個參數 | ⭐⭐⭐ 顯著改善 |
+| 2️⃣ | B（800px 輸入） | 改一個參數 | ⭐⭐⭐ 清晰度提升 |
+| 3️⃣ | C（morphological） | 幾行程式碼 | ⭐⭐ 細節平滑 |
+| 4️⃣ | D（fontTools） | 後處理 | ⭐⭐ 精細調整 |
+
+### 驗證方法
+
+1. 對一個 page 試跑改進參數
+2. 對比 `glyphs/u3D000.svg` 的邊界（用瀏覽器放大檢查）
+3. 若效果好，更新 `trace_glyphs.py` 並提交測試
+
+### 古籍版本差異
+
+- **陳昌治本**：版面規整，邊界清晰，用 `alphamax=1.5` 夠
+- **藤花榭本**：稍有損傷，建議 `alphamax=1.5–2.0`
+- **段注本**：紙張褪色，可能需 `alphamax=2.0` 或前處理優化
