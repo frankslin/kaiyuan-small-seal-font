@@ -23,12 +23,16 @@ from pathlib import Path
 
 import requests
 import yaml
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "sources" / "manifest.yaml"
 CACHE = ROOT / "sources" / "cache"
 API = "https://commons.wikimedia.org/w/api.php"
 MIN_INTERVAL = 1.0  # seconds between requests, per Commons bot policy
+# Commons only renders thumbnails at these widths; anything else is refused
+# with HTTP 400 or snapped to a neighbouring step.
+STANDARD_WIDTHS = (20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840)
 
 
 def slugify(title):
@@ -49,6 +53,19 @@ def parse_page_arg(text):
         else:
             pages.add(int(part))
     return pages
+
+
+def thumb_url_at_width(thumburl, page, width):
+    """Rewrite the API's thumburl to the requested standard width.
+
+    The API caps thumburl at the largest step below the nominal page width of
+    the PDF (1280 for the NLC scans) even though the embedded images carry more
+    detail; the thumbnail server does render the larger step when asked.
+    """
+    url, count = re.subn(r"/page\d+-\d+px-", f"/page{page}-{width}px-", thumburl, count=1)
+    if count != 1:
+        raise RuntimeError(f"unexpected thumbnail URL shape: {thumburl}")
+    return url
 
 
 def manifest_pages(entry):
@@ -157,6 +174,9 @@ def main(argv):
             title = entry["commons_title"]
             width = args.width or entry.get("render_width") or manifest.get("default_render_width", 2400)
             slug = slugify(title)
+            if width not in STANDARD_WIDTHS:
+                print(f"{key}\t{title}\trender width {width} is not a Commons thumbnail step {STANDARD_WIDTHS}", file=sys.stderr)
+                return 1
             if args.info:
                 info = commons.imageinfo(title)
                 print(f"{key}\t{title}\tpages={info.get('pagecount')}\tsize={info.get('size')}\tmime={info.get('mime')}")
@@ -181,12 +201,19 @@ def main(argv):
                 if not url:
                     print(f"  {cache_key}: no thumburl in response", file=sys.stderr)
                     continue
+                url = thumb_url_at_width(url, page, width)
                 commons.download(url, destination)
+                with Image.open(destination) as image:
+                    actual_width, actual_height = image.size
+                if actual_width != width:
+                    print(f"  {cache_key}: asked for {width}px, got {actual_width}px", file=sys.stderr)
                 index[cache_key] = {
                     "edition": key,
                     "commons_title": title,
                     "page": page,
                     "width": width,
+                    "actual_width": actual_width,
+                    "actual_height": actual_height,
                     "thumburl": url,
                     "original_sha1": info.get("sha1"),
                     "original_url": info.get("url"),

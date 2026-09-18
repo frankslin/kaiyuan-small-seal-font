@@ -37,29 +37,39 @@ QJZ 10,703、DYC 10,683。以陳昌治本（CCZ）為主底本時，有 238 個�
 
 ### 1.2 取頁方式
 
-MediaWiki API 可以直接要某一頁的指定寬度渲染圖：
+MediaWiki API 可以要某一頁的渲染圖：
 
 ```
 https://commons.wikimedia.org/w/api.php
   ?action=query&format=json&formatversion=2
   &prop=imageinfo&iiprop=url|size|sha1|mime
-  &iiurlwidth=2400&iiurlparam=page12-2400px
+  &iiurlwidth=1920&iiurlparam=page12-1920px
   &titles=File:<檔名>.pdf
 ```
 
-回應中的 `imageinfo[0].thumburl` 就是第 12 頁、寬 2400 px 的 JPEG。`pagecount`
-欄位給總頁數。另一個等價入口是
-`Special:Redirect/file/<檔名>?page=12&width=2400`。`scripts/fetch_pages.py`
-實作前者，並：
+實測（2026-09）要注意三件事：
+
+- Commons 只渲染**標準寬度檔位**（… 500、960、1280、1920、3840）；其他寬度直接
+  請求會得到 HTTP 400，經 API 則被對齊到鄰近檔位。
+- API 回傳的 `thumburl` 會被壓到「不超過 PDF 標稱頁寬的最大檔位」。國圖掃描的
+  標稱頁寬約 1637 px，所以 `thumburl` 永遠是 `page12-1280px-…`，即使回應裡的
+  `thumbwidth` 寫的是所要的寬度。把 URL 中的 `pageN-1280px-` 改寫成
+  `pageN-1920px-` 再請求，縮圖伺服器會照給。比對過 1920 與 3840 的同區域裁切，
+  細節相同，故取 **1920**（略高於原生解析度，不損失資訊）。
+- `Special:Redirect/file/<檔名>?page=N&width=W` 對多頁 PDF **不認 `page` 參數**，
+  一律回第 1 頁，不可用。
+
+`scripts/fetch_pages.py` 依此實作，並：
 
 - 依 Commons 的機器人政策帶自訂 `User-Agent`，請求間隔 ≥ 1 秒，失敗指數退避；
-- 快取到 `sources/cache/<edition>/<file-slug>/p0012-w2400.jpg`，以
-  `sources/cache/index.json` 記錄每頁的來源 URL、原檔 sha1、寬度、下載時間；
+- 快取到 `sources/cache/<edition>/<file-slug>/p0012-w1920.jpg`，以
+  `sources/cache/index.json` 記錄每頁的來源 URL、原檔 sha1、所要寬度與實際得到的
+  寬高、下載時間；
 - 支援 `--dry-run` 只列 URL，`--info` 只查頁數。
 
-渲染寬度建議 2400–3000 px：陳本半葉高約 20 cm，篆字約 1.5 cm 高，2400 px 寬的
-整葉圖裡一個篆字約 120 px 高，potrace 需要至少 100 px 才能得到平滑輪廓。若某檔
-的原始解析度更高可提高寬度；寬度記進 provenance。
+國圖藏陳本（見 manifest）在 1920 px 的跨頁圖上，每欄寬約 90 px，行首正篆約
+70×85 px。這低於 potrace 理想的 100 px，所以第 5 節「先放大再二值化」是必要步驟
+而非優化。掃描帶有國圖的淺色浮水印線條橫貫版心，二值化時要確保它落在門檻之下。
 
 ### 1.3 manifest 格式
 
@@ -76,16 +86,20 @@ editions:
       - commons_title: "File:XXXX 說文解字 第1冊.pdf"
         institution: 國家圖書館（中國）掃描，經 Wikimedia Commons
         reuse_terms: "Public domain; 見 Commons 檔案頁的授權模板"
-        render_width: 2400
+        render_width: 1920              # 必須是 Commons 標準檔位
         image_kind: spread              # spread（一圖兩半葉）或 half_leaf（一圖一半葉）
         pages:
-          - first: 7                    # 1-based PDF 頁碼
-            last: 63
+          - first: 15                   # 1-based PDF 頁碼
+            last: 31
+            first_side: left            # 本卷自首頁的左半開始（預設 right）
+            last_side: right            # 本卷止於末頁的右半（預設 left）
             juan: 卷一上
-            note: 第 7 頁自「一部」起
-          - first: 64
-            last: 118
+            radicals: [1, 10]           # kSEAL_Rad 編號範圍，用來推得期望篆字數
+          - first: 32
+            last: 58
+            last_side: right
             juan: 卷一下
+            radicals: [11, 14]
         skip_pages: [40]                # 空白頁、書名頁、掃描重複頁
 ```
 
@@ -109,20 +123,21 @@ editions:
 
 ## 3. 篆字偵測（`segment_pages.py` 第二段）
 
-陳本一欄的結構是：頂端一個大篆字，其下為楷書說解（雙行小字），說解中會**行內**出現
-重文篆字與「某某切」等文字。要抓的是：
+陳本一欄的結構是：頂端一個正篆，其下為單行大字楷書說解，反切與校語為雙行小字。
+說解較長時佔用後續各欄（這些接續欄頂端沒有篆字）。重文篆字**行內**出現在說解
+之中，後面跟著「古文某」「籒文」「或从某」等說明。要抓的是：
 
-- **行首正篆**：欄內最上方、面積最大的連通元件群。做法是取欄頂端往下的水平投影，
-  第一段連續墨跡即為篆字區；再以連通元件的外接框合併（篆字常斷成多個元件）。
-- **行內重文**：混在小字裡，尺寸與小字接近，不能靠大小。需要一個「篆 vs 楷」
-  二分類器。
+- **行首正篆**：欄頂第一個字格。注意接續欄頂端是楷書，不能假設每欄頂都是篆字，
+  所以行首也要過分類器。
+- **行內重文**：與大字楷書**同格、同大**（實測皆約佔滿欄寬），不能靠尺寸區分，
+  需要一個「篆 vs 楷」二分類器。先把每欄依水平投影切成字格，再逐格分類。
 
 分類器策略：
 
 1. 先用行首正篆當正樣本、明顯的小字楷書當負樣本，自動得到數千筆標註。
 2. 特徵用 HOG + 筆畫寬度統計（篆書筆畫等寬、轉折圓、無楷書的頓挫與尖角），
    先跑 scikit-learn 的邏輯迴歸或 SVM；不夠再上小型 CNN。
-3. 在小字區以滑動視窗＋非極大值抑制找候選，過分類器。
+3. 對每欄的每個大字字格過分類器；雙行小字區依寬度先行排除。
 4. 分類器輸出分數進 provenance，低信心的進人工審核。
 
 每個偵測到的篆字輸出：頁、半葉、欄、閱讀順序序號、外接框、種類（headword/inline）、
@@ -130,24 +145,33 @@ editions:
 
 ## 4. 對位（`align_sequence.py`）
 
-單純計數（第 N 個切片 = 流水號 N）在整本書上一定會累積錯誤，所以用**序列對齊**：
+單純計數（第 N 個切片 = 流水號 N）在整本書上一定會累積錯誤，所以要有錨點把計數
+逐段重新對齊。
 
-1. 由 `SealSources.txt` 產生該版本的期望序列：`[(流水號, 碼位, 楷書字頭)]`。
-2. 對每個偵測到的篆字，OCR 其緊鄰的楷書字頭（陳本正篆之下第一個大字即為楷書
-   字頭；重文旁則是「古文／籒文／或从某」等說明，OCR 到的字可能是部件）。OCR 用
-   tesseract `chi_tra` + `chi_tra_vert`，或 PaddleOCR；《說文》有大量罕用字 OCR
-   認不出，沒關係，只要一部分能當**錨點**即可。
-3. 以 Needleman–Wunsch 把「偵測序列」對齊到「期望序列」：OCR 相符給高分，
-   不相符給零分而非負分（因為 OCR 會錯），插入／刪除給負分。這樣少切、多切一個
-   篆字只會在局部造成 gap，不會讓整卷錯位。
-4. 卷首、部首（`kSEAL_Rad` 的首字）與每部的字數是天然的硬錨點：部首字在陳本是
-   「凡某之屬皆从某」前的那個字，可以再用規則核對。
-5. 對齊結果分三類寫入 `data/provenance/glyphs.csv`：
-   `aligned`（有錨點支持）、`inferred`（靠鄰居推得、無 OCR 支持）、
-   `conflict`（gap 或 OCR 矛盾）。`conflict` 與連續過長的 `inferred` 進審核。
+**陳本沒有楷書字頭。** 大徐本的正篆之下直接是說解（「大也从一不聲」），並不像
+段注本那樣先出一個楷書字頭，所以「OCR 字頭對 `kSEAL_MCJK`」在陳本不成立。陳本
+可用的硬錨點是**部**：
 
-驗收：每卷結束時，偵測總數與期望總數之差為 0；`conflict` 全部經人工處理；
-`inferred` 連續長度 ≤ 20。
+1. 每部結束處有一個計數欄（「文五　重一」，低數格起排、欄內無篆字）；有新附字的
+   部還有第二個計數欄（「文四　新附」）。`segment_pages.py` 輸出的每欄墨跡段足以
+   認出這種欄。
+2. `SealSources.txt` 的 `kSEAL_Rad` 給出每部在該版本的篆字數（正篆＋重文＋新附）。
+   manifest 的 `radicals` 指定每卷涵蓋的部首編號範圍。
+3. 以動態規劃替每部挑一個收尾的計數欄（單調、總計數差最小；多出來的計數欄如新附
+   小計可略過）。某部偵測數＝期望數時，該部各字依序取得碼位，狀態 `aligned`；
+   不等時整部標為 `conflict` 進審核，不猜。
+4. 結果寫入 `data/provenance/glyphs.csv`；計數吻合的部另存
+   `build/alignment/<edition>-verified.json`，`segment_pages.py` 下次執行時會把
+   這些欄當成額外的訓練標註（含行內重文的正樣本）。
+
+已知弱點：部內「一個誤判＋一個漏判」會互相抵銷而計數仍吻合（卷一下屮部實際
+發生過：界欄殘線被當成篆字、真正的「屮」漏掉）。所以 `aligned` 仍須過校樣；
+後續要加部內的第二重檢查，候選做法：OCR 重文後面的「古文某／籒文某／或从某」、
+以說解的 OCR 文字比對公版《說文》電子文本、檢查切片的長寬與墨量離群值。
+
+其他版本（段注本等）有楷書字頭者，仍可照原設計用 OCR 錨點做序列對齊。
+
+驗收：每部偵測數與期望數之差為 0；`conflict` 全部經人工處理。
 
 ## 5. 向量化與正規化（`trace_glyphs.py`）
 
@@ -156,7 +180,8 @@ editions:
 2. 去噪：面積 < (筆畫寬)² × 0.3 的元件視為木刻毛邊或紙紋，刪除；但要保留篆書的
    短點畫，所以門檻用該字的筆畫寬估計值（距離變換的中位數）而非固定像素。
 3. potrace：`turdsize` 依上一步門檻換算，`alphamax 1.0`，`opttolerance 0.2`。
-   可用系統 `potrace` 二進位或純 Python 的 `potracer`；輸出 SVG path。
+   用純 Python 的 `potracer`（注意它描的是陣列中為 False 的像素）；輸出 SVG path，
+   座標取整數字型單位以控制檔案大小。
 4. **正規化到字身框**：UPM 1000，ascender 880、descender −120。篆書字形偏長，
    以高度為主縮放：字形高縮到 760 單位，垂直置中於 [−60, 820]，水平置中於 1000
    寬度；寬度超過 880 時改以寬度縮放。縮放係數與原始像素高記進 provenance，
@@ -170,9 +195,10 @@ editions:
 
 ## 6. 建字型（`build_font.py`）
 
-- 工具：fontTools + ufoLib2 + fontmake，全部純 Python，不依賴 FontForge。
-- 流程：讀 `glyphs/`（套用 overrides）→ 以 `fontTools.svgLib.path.SVGPath`
-  畫進 UFO glyph（三次曲線）→ fontmake 產 OTF（CFF）與 TTF（cu2qu 轉二次）。
+- 工具：fontTools（`FontBuilder`），純 Python，不依賴 FontForge。
+- 流程：讀 `glyphs/`（套用 overrides）→ `fontTools.svgLib.path.parse_path` 取得
+  三次曲線輪廓 → 直接產 OTF（CFF）與 TTF（cu2qu 轉二次）。字形集不完整時照樣
+  建置並回報覆蓋率；發行時加 `--require-complete`。
 - glyph 名 `uXXXXX`；cmap 需含 format 12 子表（Plane 3）。fontTools 對任何碼位
   都不需要 Unicode 資料表支援，工具鏈不會因 Unicode 18.0 太新而卡住。
 - 名稱：家族名 `Kaiyuan Small Seal`，樣式 `Regular`，版本號跟 git tag。
@@ -223,7 +249,7 @@ codepoint,action,edition,commons_title,page,x,y,w,h,reason
 
 ## 10. 待維護者決定
 
-- 陳昌治本在 Commons 上使用哪一份掃描（檔名、冊數對應卷數）；本沙箱連不上
-  Commons，尚未填入。
+- 陳昌治本已選定國圖藏本（`NLC892-312002098744-*`，見 manifest）；藤花榭本、
+  段注本、QJZ 本在 Commons 上使用哪一份掃描尚未選定。
 - 腳本授權（傾向 MIT）與 OFL Reserved Font Name。
 - OCR 引擎（tesseract 最省事；PaddleOCR 對罕用字辨識率通常較高但依賴重）。

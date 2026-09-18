@@ -58,8 +58,11 @@ Planned (create as the pipeline lands; keep these names):
 
 - Use Wikimedia Commons scans of public-domain editions only. Address a page
   as (Commons file title, 1-based page number). Fetch page renderings
-  through the MediaWiki API or `Special:Redirect/file/<title>?page=N&width=W`
+  through the MediaWiki imageinfo API (as `scripts/fetch_pages.py` does)
   rather than downloading whole PDFs or DjVu files; record the width used.
+  `Special:Redirect/file/<title>?page=N` ignores `page` for PDFs and always
+  returns page 1, and only the standard thumbnail widths (… 1280, 1920,
+  3840) are rendered; see `docs/technical-roadmap.md` §1.2.
 - Preferred primary edition: 陳昌治本 (同治十二年, one seal headword per
   line). Fall back to other editions only for code points the primary lacks,
   as indicated by the absence of the corresponding source property in
@@ -87,9 +90,14 @@ each edition, in reading order. The pipeline relies on this:
   inline in the running text rather than on their own line. The segmenter
   must find them too; treat seal-vs-regular-script classification as a
   first-class component with its own tests.
-- Cross-check every aligned glyph by OCR of the regular-script headword next
-  to it against `kSEAL_MCJK`. Mismatches go to `data/corrections.csv` for
-  review; never silently accept them.
+- Re-anchor the count at every 部. 陳昌治本 has no regular-script headword
+  under the seal (the 說解 follows directly), so OCR against `kSEAL_MCJK`
+  does not apply to it; instead each 部 ends with a tally column
+  (「文N 重M」) and `kSEAL_Rad` gives the expected seals per 部. A 部 whose
+  count differs is a `conflict` for review; never guess. A matching count can
+  still hide one false positive cancelling one miss, so aligned glyphs must
+  still pass the proof sheets. Editions that do print a regular-script
+  headword should be cross-checked by OCR against `kSEAL_MCJK`.
 
 ## Font build conventions
 

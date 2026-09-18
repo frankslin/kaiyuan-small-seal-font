@@ -1,13 +1,14 @@
 # Scan sources. This is the only place that names scans; see docs/technical-roadmap.md §1.3.
 # Nothing under sources/cache/ is committed.
 #
-# TODO: fill in the Wikimedia Commons file titles and page ranges for each edition.
-# The sandbox that created this file could not reach commons.wikimedia.org, so the
-# entries below are placeholders. Verify the edition of each Commons file on its
-# file page before use.
+# render_width must be one of the Commons thumbnail steps (… 960, 1280, 1920, 3840).
+# Page numbers are 1-based PDF pages. In a `pages` block, `first_side`/`last_side`
+# say on which half of the first/last image the 卷 begins/ends (default: right/left,
+# i.e. the whole image), and `radicals` is the inclusive range of kSEAL_Rad numbers
+# the block covers, from which the expected seal count is derived.
 
 user_agent: "kaiyuan-small-seal-font/0.1 (https://github.com/frankslin/kaiyuan-small-seal-font)"
-default_render_width: 2400
+default_render_width: 1920
 
 editions:
   ccz:
@@ -15,17 +16,82 @@ editions:
     source_property: kSEAL_CCZSrc
     sequence_prefix: "C-"
     priority: 1
-    files: []
-    # files:
-    #   - commons_title: "File:<institution id> 說文解字 第1冊.pdf"
-    #     institution: ""
-    #     reuse_terms: "Public domain"
-    #     render_width: 2400
-    #     image_kind: spread        # spread | half_leaf
-    #     columns: 0                # seals per 半葉 for the regular layout, 0 = unknown
-    #     pages:
-    #       - {first: 1, last: 1, juan: 卷一上, note: ""}
-    #     skip_pages: []
+    files:
+      # 國家圖書館（中國）藏本，十冊；第 1–8 冊為正文，第 9–10 冊為《說文通檢》（不用）。
+      # 檔案頁著錄：番禺陳昌治 清同治12年[1873] 刻本，10行，白口左右雙邊單魚尾，
+      # 善本書號 字131.1 254.7。每個 PDF 頁是一個翻開的跨頁，原生寬約 1637 px。
+      - commons_title: "File:NLC892-312002098744-312888 說文解字 十五卷 第1冊.pdf"
+        institution: 中國國家圖書館（中華古籍資源庫），經 Wikimedia Commons
+        reuse_terms: "Public domain（Commons 檔案頁授權欄，LicenseShortName）"
+        original_sha1: 582c12b46e40cc1c739c154fa685f4d5229f91c4
+        page_count: 61
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages:
+          - {first: 15, last: 31, first_side: left, last_side: right, juan: 卷一上, radicals: [1, 10],
+             note: "p15 右半為〈標目〉末；左半自「一部」起。p31 左半空白"}
+          - {first: 32, last: 58, first_side: right, last_side: right, juan: 卷一下, radicals: [11, 14],
+             note: "p58 左半為校刊姓名，無篆字"}
+        skip_pages: []
+      # TODO: 第 3–8 冊的卷頁範圍待逐冊核定後填入。各半卷的部首編號範圍：
+      #   三上 45–69、三下 70–97、四上 98–120、四下 121–142、五上 143–169、五下 170–205、
+      #   六上 206–209、六下 210–230、七上 231–260、七下 261–286、八上 287–305、八下 306–323、
+      #   九上 324–349、九下 350–369、十上 370–384、十下 385–409、十一上 410、十一下 411–430、
+      #   十二上 431–442、十二下 443–466、十三上 467–478、十三下 479–489、十四上 490–499、十四下 500–540。
+      - commons_title: "File:NLC892-312002098744-312890 說文解字 十五卷 第2冊.pdf"
+        original_sha1: 9299bc43449c6d1ecbc8b18f2309118438ca1775
+        page_count: 92
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages:
+          - {first: 3, last: 25, first_side: left, last_side: right, juan: 卷二上, radicals: [15, 30]}
+          - {first: 25, last: 45, first_side: left, juan: 卷二下, radicals: [31, 44],
+             note: "與卷二上末同在 p25；p45 左半為計數欄與校刊姓名"}
+          # TODO 卷三上（radicals 45–69）、卷三下（70–97）：候選分界 p45/46、p68/69、p89/90，待目視核定
+      - commons_title: "File:NLC892-312002098744-312894 說文解字 十五卷 第3冊.pdf"
+        original_sha1: 4f8ae8399de66159720255cdb2b456c3f2cfce18
+        page_count: 94
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages: []            # TODO 卷四上–卷五下
+      - commons_title: "File:NLC892-312002098744-312891 說文解字 十五卷 第4冊.pdf"
+        original_sha1: 185d9da27b0a708fdad31e40a105b7f92d47f8a1
+        page_count: 101
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages: []            # TODO 卷六上–卷七下
+      - commons_title: "File:NLC892-312002098744-312896 說文解字 十五卷 第5冊.pdf"
+        original_sha1: 6221559a8f11daf125e936775f9ad43183a05c0a
+        page_count: 81
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages: []            # TODO 卷八上–卷九下
+      - commons_title: "File:NLC892-312002098744-312897 說文解字 十五卷 第6冊.pdf"
+        original_sha1: 2e3d4978ec3d3d2e61534df8cda4f62995a2a16d
+        page_count: 101
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages: []            # TODO 卷十上–卷十一下
+      - commons_title: "File:NLC892-312002098744-312889 說文解字 十五卷 第7冊.pdf"
+        original_sha1: a4ed9c55885d46ad9547ff2ff64d98a0ce4ba97c
+        page_count: 100
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages: []            # TODO 卷十二上–卷十三下
+      - commons_title: "File:NLC892-312002098744-312895 說文解字 十五卷 第8冊.pdf"
+        original_sha1: d044d05b96c68d8ea7a3765d3d8ae3715a2f6922
+        page_count: 73
+        render_width: 1920
+        image_kind: spread
+        columns: 10
+        pages: []            # TODO 卷十四上–卷十五下、校字記
 
   thx:
     name: 藤花榭本《說文解字》（嘉慶十二年額勒布刻本）
