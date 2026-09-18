@@ -41,6 +41,8 @@ summary at the end.
 
 人工修正放在 `data/overrides/`（逐字 SVG）與 `data/corrections.csv`（裁切框或對位修正），建置時覆蓋自動結果。
 
+完整設計、資料格式與驗收標準見 [`docs/technical-roadmap.md`](docs/technical-roadmap.md)。要跑管線，先建立虛擬環境並安裝 `requirements.txt`，再依 `sources/manifest.yaml` 填入 Commons 檔名與卷頁，執行 `scripts/fetch_pages.py`。
+
 ## 發行物
 
 1. **Kaiyuan Small Seal**：字形掛在 Unicode 篆書區塊碼位上，是主字型。搭配 [OpenCC](https://github.com/BYVoid/OpenCC) 的 `t2seal` 配置可把繁體文字轉成篆書碼位後顯示。

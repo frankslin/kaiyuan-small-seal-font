@@ -1,0 +1,14 @@
+# Pipeline dependencies. Install into a virtual environment:
+#   python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+requests>=2.31
+PyYAML>=6.0
+numpy>=1.26
+opencv-python-headless>=4.9
+scikit-image>=0.22
+scikit-learn>=1.4
+Pillow>=10.0
+potracer>=0.0.4
+pytesseract>=0.3.10
+fonttools[ufo,unicode]>=4.50
+ufoLib2>=0.16
+fontmake>=3.8

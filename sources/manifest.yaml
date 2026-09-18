@@ -1,0 +1,49 @@
+# Scan sources. This is the only place that names scans; see docs/technical-roadmap.md §1.3.
+# Nothing under sources/cache/ is committed.
+#
+# TODO: fill in the Wikimedia Commons file titles and page ranges for each edition.
+# The sandbox that created this file could not reach commons.wikimedia.org, so the
+# entries below are placeholders. Verify the edition of each Commons file on its
+# file page before use.
+
+user_agent: "kaiyuan-small-seal-font/0.1 (https://github.com/frankslin/kaiyuan-small-seal-font)"
+default_render_width: 2400
+
+editions:
+  ccz:
+    name: 陳昌治本《說文解字》十五卷（同治十二年番禺陳昌治校刊，一篆一行）
+    source_property: kSEAL_CCZSrc
+    sequence_prefix: "C-"
+    priority: 1
+    files: []
+    # files:
+    #   - commons_title: "File:<institution id> 說文解字 第1冊.pdf"
+    #     institution: ""
+    #     reuse_terms: "Public domain"
+    #     render_width: 2400
+    #     image_kind: spread        # spread | half_leaf
+    #     columns: 0                # seals per 半葉 for the regular layout, 0 = unknown
+    #     pages:
+    #       - {first: 1, last: 1, juan: 卷一上, note: ""}
+    #     skip_pages: []
+
+  thx:
+    name: 藤花榭本《說文解字》（嘉慶十二年額勒布刻本）
+    source_property: kSEAL_THXSrc
+    sequence_prefix: "TH-"
+    priority: 2
+    files: []
+
+  dyc:
+    name: 段玉裁《說文解字注》（經韵樓本）
+    source_property: kSEAL_DYCSrc
+    sequence_prefix: "D-"
+    priority: 3
+    files: []
+
+  qjz:
+    name: 祁寯藻本《說文解字繫傳》（小徐本；QJZ 對應版本待依 UAX #60 確認）
+    source_property: kSEAL_QJZSrc
+    sequence_prefix: "K-"
+    priority: 4
+    files: []
