@@ -33,6 +33,8 @@ GLYPHS = ROOT / "glyphs"
 TRACE_HEIGHT = 600          # pixels the crop is enlarged to before thresholding
 MARGIN = 16                 # source pixels kept around the crop box, so a tight box does not clip strokes
 MAX_FACTOR = 8.0
+RULE_WIDTH, RULE_COVER, RULE_ZONE = 3.4, 0.4, 0.15  # scan pixels (rules are 2–3, strokes 5.5–8), of the box height, of the box width
+RULE_BEYOND = 0.3  # of the margin rows above and below the box
 REACH = 8                   # source pixels beyond the box within which stroke ends are still kept
 TRACED = ("aligned", "manual", "approved")  # `inferred` pairs wait for a human decision
 ASCENDER, DESCENDER = 880, -120
@@ -77,6 +79,30 @@ def keep_lines():
         return frozenset(r["codepoint"].upper() for r in csv.DictReader(fh) if r["action"] == "keep-lines")
 
 
+def remove_side_rules(mask, factor, inner):
+    """Erase column rules at the sides of the box, in place.
+
+    Most rules are printed broken, so they do not run through the crop and
+    the edge-to-edge test misses them. A rule is much thinner than a seal
+    stroke (in scan pixels; the stroke estimate is unreliable next to a frame), stands at the side of the box and covers much of its height.
+    Only the rows where the ink is that thin are erased, so a stroke that
+    crosses or touches the rule keeps its full width.
+    """
+    width = max(2, int(RULE_WIDTH * factor))
+    wide = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (width + 1, 1)))
+    thin = (mask > 0) & (wide == 0)
+    y0, y1 = max(0, int(inner[1])), int(inner[3])
+    cover = np.convolve(thin[y0:y1].sum(0), np.ones(width), mode="same") / max(1, y1 - y0)
+    side = (inner[2] - inner[0]) * RULE_ZONE
+    # unlike a stroke of the seal, a rule goes on above or below the box
+    outside = np.r_[thin[:y0], thin[y1:]]
+    beyond = np.convolve(outside.sum(0), np.ones(width), mode="same") / max(1, len(outside))
+    for x in np.flatnonzero((cover >= RULE_COVER) & (beyond >= RULE_BEYOND)):
+        if x <= inner[0] + side or x >= inner[2] - side:
+            band = slice(max(0, x - width), x + width + 1)
+            mask[:, band][thin[:, band]] = 0
+
+
 def crop_mask(row):
     """Binary mask of the seal, enlarged, and the enlargement factor."""
     half = half_leaf(row["edition"], row["commons_title"], int(row["page"]), int(row["render_width"]),
@@ -104,6 +130,8 @@ def crop_mask(row):
     distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
     stroke = 2 * float(np.median(distance[distance > 0.5 * distance.max()])) if distance.max() > 0 else 1.0
     inner = np.array([x - x0, y - y0, x - x0 + w, y - y0 + h]) * factor
+    if row["codepoint"] not in keep_lines():
+        remove_side_rules(mask, factor, inner)
     # Ink further than REACH from the box is never part of the seal; cutting it
     # first also severs strokes from a frame line they happen to touch.
     reach = np.zeros(mask.shape, bool)
