@@ -86,7 +86,7 @@ def main(argv):
     # every box the pipeline saw but did not use, as candidates for missing seals
     spare = defaultdict(list)
     for i, row in rejected:
-        spare[(int(row["page"]), row["side"])].append((dict(row), f"rejected-{i:05d}", f"{row['kind']} {row['score']}"))
+        spare[(row["commons_title"], int(row["page"]), row["side"])].append((dict(row), f"rejected-{i:05d}", f"{row['kind']} {row['score']}"))
     for path in sorted((ROOT / "build" / "pages").glob("*/*/p*.json")):
         record = json.loads(path.read_text(encoding="utf-8"))
         for half in record["halves"]:
@@ -96,7 +96,7 @@ def main(argv):
                        "side": half["side"], "render_width": record["render_width"],
                        "crop_x0": half["geometry"]["crop_x"][0], "crop_x1": half["geometry"]["crop_x"][1],
                        "rotation": half["geometry"]["rotation"], "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
-                spare[(record["page"], half["side"])].append(
+                spare[(record["commons_title"], record["page"], half["side"])].append(
                     (row, f"near-p{record['page']:04d}-{half['side']}-{k:02d}", f"候選 {near['score']}"))
 
     def spare_cell(row, name, note, codepoint=""):
@@ -115,13 +115,14 @@ def main(argv):
     missing = json.loads(missing_path.read_text(encoding="utf-8")) if missing_path and missing_path.exists() else []
     body.append(f"<h2>沒找到的字（{len(missing)}）</h2><p>每個字後面列出同一半葉上沒被採用的框；對的那個，把它下方的整行貼進 "
                 "<code>data/corrections.csv</code>。都不對就到 <code>build/pages/…-overlay.jpg</code> 量座標。</p>")
+    titles = {row["codepoint"]: row["commons_title"] for row in rows}
     for item in missing:
         after = item["after"]
         where = f"在 U+{after['codepoint']}（p{after['page']} {after['side']}）之後" if after else "在卷首"
         body.append(f"<h3><span class='modern'>{html.escape(modern.get(item['codepoint'], ''))}</span> U+{item['codepoint']} "
                     f"{item['sequence']} · {html.escape(item['juan'])} {where}</h3><div class='grid'>")
         if after:
-            for row, name, note in spare.get((after["page"], after["side"]), [])[:8]:
+            for row, name, note in spare.get((titles.get(after["codepoint"], ""), after["page"], after["side"]), [])[:8]:
                 body.append(spare_cell(row, name, note, item["codepoint"]))
         body.append("</div>")
 

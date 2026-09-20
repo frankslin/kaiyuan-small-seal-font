@@ -119,19 +119,59 @@ def rotate(gray, angle):
     return cv2.warpAffine(gray, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
-def fit_grid(profile, columns, inner_at_start, slack=70):
+COLUMN_PER_HEIGHT = 0.0699  # column pitch over frame height, median of all 1,226 half-leaves of 陳昌治本
+
+
+def text_ratio(ink, origin, pitch, columns):
+    """Ink in the middle half of the columns over ink in the half around the rules.
+
+    About 2 on a well-fitted grid and about 1 when the grid sits half a column
+    off, which happens where the rules are faint and the vertical strokes of
+    the text are taken for rules.
+    """
+    inside = around = 0.0
+    for k in range(columns):
+        a, b = origin + pitch * k, origin + pitch * (k + 1)
+        q = (b - a) / 4
+        inside += ink[int(a + q):int(b - q)].sum()
+        around += ink[int(a):int(a + q)].sum() + ink[int(b - q):int(b)].sum()
+    return inside / max(1.0, around)
+
+
+def fit_grid(profile, columns, inner_at_start, slack=70, ink=None, pitches=None):
     """Best (origin, pitch) of columns+1 equally spaced rules.
 
     The inner frame line lies within `slack` pixels of the gutter edge of the
     half image; the 版心 and the book edge lie beyond the outer frame line.
+    With `ink` (ink per pixel column), a fit whose text straddles the rules
+    gives way to the best fit about half a column away if the text sits
+    clearly better in that one.
     """
+    if ink is not None:
+        origin, pitch = fit_grid(profile, columns, inner_at_start, slack, pitches=pitches)
+        ratio = text_ratio(ink, origin, pitch, columns)
+        if ratio < 1.4:
+            best = (-1.0, origin, pitch)
+            smooth = np.minimum(np.convolve(profile, np.ones(5), mode="same"), profile.max() * 0.25)
+            for shift in (-0.5, 0.5):
+                for p2 in np.arange(pitch - 1.5, pitch + 1.5, 0.1):
+                    for o2 in np.arange(origin + shift * pitch - 10, origin + shift * pitch + 10, 1.0):
+                        if o2 < 0 or o2 + p2 * columns > len(profile) - 1:
+                            continue
+                        pos = np.round(o2 + p2 * np.arange(columns + 1)).astype(int)
+                        score = smooth[pos].sum() + smooth[pos[0]] + smooth[pos[-1]]
+                        if score > best[0]:
+                            best = (float(score), float(o2), float(p2))
+            if best[0] >= 0 and text_ratio(ink, best[1], best[2], columns) > max(1.5, ratio * 1.3):
+                return best[1], best[2]
+        return origin, pitch
     w = len(profile)
     # Count rules hit rather than summing their strength, otherwise the heavy
     # frame lines, the 版心 and the book edge outweigh the faint column rules.
     smooth = np.minimum(np.convolve(profile, np.ones(5), mode="same"), profile.max() * 0.25)
     best = (-1.0, 0.0, 0.0)
     nominal = w / (columns + 1.2)
-    for pitch in np.arange(nominal * 0.9, nominal * 1.12, 0.1):
+    for pitch in (np.arange(pitches[0], pitches[1], 0.1) if pitches else np.arange(nominal * 0.9, nominal * 1.12, 0.1)):
         span = pitch * columns
         origins = np.arange(0, slack, 1.0) if inner_at_start else np.arange(w - 1 - span - slack, w - 1 - span, 1.0)
         for origin in origins:
@@ -172,7 +212,12 @@ def half_geometry(gray, columns, side):
     (t0, t1), (b0, b1) = frame_rows(bw)
     top, bottom = t1 + 1, b0 - 1
     profile = long_lines(bw[top:bottom], False, (bottom - top) // 5).sum(0) / 255
-    origin, pitch = fit_grid(profile, columns, inner_at_start=(side == "right"))
+    strict = binarize(gray, strict=True)[top + 20:bottom - 20]
+    # The block is cut to one proportion: a column is 0.0699 of the frame height.
+    # Without this bound, faint rules let the fit stretch to 92–94 px (true: 83–86).
+    expect = (bottom - top) * COLUMN_PER_HEIGHT
+    origin, pitch = fit_grid(profile, columns, inner_at_start=(side == "right"), ink=(strict > 0).sum(0).astype(float),
+                             pitches=(expect * 0.97, expect * 1.03))
     rules = []
     for k in range(columns + 1):
         x = int(round(origin + pitch * k))
@@ -637,7 +682,7 @@ def main(argv):
     heights = {key: st["geometry"]["bottom"] - st["geometry"]["top"] for key, st in halves.items()}
     typical = float(np.median(list(heights.values())))
     odd = [f"p{page:04d} {side} ({height} px)" for (_, page, side), height in heights.items()
-           if abs(height - typical) > typical * 0.04]
+           if abs(height - typical) > typical * 0.08]  # some spreads were photographed about 5% smaller
     if odd:
         print(f"frame height differs from the typical {typical:.0f} px: {', '.join(odd)}", file=sys.stderr)
         return 1

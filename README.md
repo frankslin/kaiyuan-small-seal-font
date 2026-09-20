@@ -8,7 +8,7 @@ woodblock editions of the 說文解字, every glyph carries its provenance, and
 the fonts are released under the SIL Open Font License 1.1. See the English
 summary at the end.
 
-> 專案處於起步階段：管線已用陳昌治本卷一端到端跑通（切字、對位、向量化、建字型、校樣），尚未涵蓋全書，也尚未發行字型。
+> 專案處於起步階段：管線已對陳昌治本全書（卷一至卷十四）跑過第一輪（切字、對位、向量化、建字型、校樣），11,090 個碼位中 10,927 個已對位，正在逐字人工審核鎖定；尚未發行字型。
 
 ## 目標
 
@@ -54,6 +54,17 @@ python3 scripts/build_font.py                     # 建字型，輸出 build/*.t
 python3 scripts/proof_sheets.py                   # 校樣，輸出 build/proof/index.html
 ```
 
+審核用本機網頁（只綁 127.0.0.1）：
+
+```sh
+python3 scripts/review_server.py                  # 開 http://127.0.0.1:8765/
+```
+
+在網頁上成批「批准並鎖定」字形（寫入 `data/approved.csv`，此後重跑管線不會再動
+它們）；其餘的可逐字回饋：刪除、拖拉調整邊框、換成另一個字、留言，沒找到的字可
+直接在頁面圖上框選。回饋寫入 `data/corrections.csv` 與 `data/review_feedback.csv`，
+按「重新對位並重建」生效。
+
 完整設計、資料格式與驗收標準見 [`docs/technical-roadmap.md`](docs/technical-roadmap.md)。
 
 ## 發行物
@@ -92,8 +103,10 @@ verification script exist, the fonts do not yet.
 ## 开发状态
 
 - [x] 项目初始化、文档与技术路线
-- [x] Manifest 填入 Wikimedia Commons 文件名（陈昌治本十册已选定；卷一、卷二页码已核定）
+- [x] Manifest 填入 Wikimedia Commons 文件名（陈昌治本十册已选定；卷一至卷十四页码与部首范围已核定）
 - [x] 第一份扫描成功切字和对位（卷一 783 字中 732 字高信心对位，其余列入人工审核清单）
 - [x] 字型端到端build成功（卷一已对位部分，TTF/OTF 主字型与相容版）
-- [ ] 陈昌治本全书切字对位、审核清单清零
+- [x] 陈昌治本全书第一轮切字对位（11,090 字中 10,927 字已对位，60 字待确认，103 字未找到）
+- [ ] 人工审核锁定全部字形、审核清单清零
+- [ ] 陈昌治本所缺 238 个码位改用其他版本
 - [ ] v0.1 发布

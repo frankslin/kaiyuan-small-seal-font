@@ -31,9 +31,10 @@ from segment_pages import rotate
 PROVENANCE = ROOT / "data" / "provenance" / "glyphs.csv"
 GLYPHS = ROOT / "glyphs"
 TRACE_HEIGHT = 600          # pixels the crop is enlarged to before thresholding
-MARGIN = 8                  # source pixels kept around the crop box
+MARGIN = 16                 # source pixels kept around the crop box, so a tight box does not clip strokes
 MAX_FACTOR = 8.0
-TRACED = ("aligned", "manual")  # `inferred` pairs wait for a human decision
+REACH = 8                   # source pixels beyond the box within which stroke ends are still kept
+TRACED = ("aligned", "manual", "approved")  # `inferred` pairs wait for a human decision
 ASCENDER, DESCENDER = 880, -120
 GLYPH_HEIGHT, GLYPH_MAX_WIDTH = 760, 760
 CENTRE_X, CENTRE_Y = 500, 380
@@ -103,12 +104,24 @@ def crop_mask(row):
     distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
     stroke = 2 * float(np.median(distance[distance > 0.5 * distance.max()])) if distance.max() > 0 else 1.0
     inner = np.array([x - x0, y - y0, x - x0 + w, y - y0 + h]) * factor
+    # Ink further than REACH from the box is never part of the seal; cutting it
+    # first also severs strokes from a frame line they happen to touch.
+    reach = np.zeros(mask.shape, bool)
+    reach[max(0, int(inner[1] - REACH * factor)):int(inner[3] + REACH * factor),
+          max(0, int(inner[0] - REACH * factor)):int(inner[2] + REACH * factor)] = True
+    mask[~reach] = 0
     count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # The box is the segmenter's tight ink box and may clip a stroke end or
+    # leave a detached dot just outside. Keep every component that lies
+    # mostly inside the box, whole; neighbours lie mostly outside.
+    ix0, iy0, ix1, iy1 = (int(round(v)) for v in inner)
+    inside = np.zeros(mask.shape, bool)
+    inside[max(0, iy0):iy1, max(0, ix0):ix1] = True
     for i in range(1, count):
-        cx, cy = centroids[i]
-        outside = not (inner[0] <= cx <= inner[2] and inner[1] <= cy <= inner[3])
-        if stats[i, cv2.CC_STAT_AREA] < stroke * stroke * 0.3 or outside:
-            mask[labels == i] = 0
+        component = labels == i
+        mostly_inside = (component & inside).sum() >= 0.5 * stats[i, cv2.CC_STAT_AREA]
+        if stats[i, cv2.CC_STAT_AREA] < stroke * stroke * 0.3 or not mostly_inside:
+            mask[component] = 0
     return mask, factor, stroke
 
 
@@ -134,6 +147,7 @@ def svg_path(curves, to_units):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--only", help="comma-separated code points (hex)")
+    parser.add_argument("--force", action="store_true", help="retrace glyphs whose crop box has not changed")
     args = parser.parse_args(argv)
     only = {c.strip().upper() for c in args.only.split(",")} if args.only else None
 
@@ -141,8 +155,21 @@ def main(argv):
         rows = [r for r in csv.DictReader(fh) if r["status"] in TRACED and (not only or r["codepoint"] in only)]
     rows.sort(key=lambda r: (r["commons_title"], int(r["page"]), r["side"]))
     GLYPHS.mkdir(exist_ok=True)
-    written = 0
+    if not only:  # a code point that lost its crop must not keep its old outline
+        current = {f"u{r['codepoint']}.svg" for r in rows}
+        for path in GLYPHS.glob("u*.svg"):
+            if path.name not in current:
+                path.unlink()
+    lines = ",".join(sorted(keep_lines()))
+    written = kept = 0
     for row in rows:
+        # skip crops that were traced before with the same box and settings
+        crop = " ".join([row["commons_title"].replace('"', ""), row["page"], row["side"], row["x"], row["y"], row["w"], row["h"],
+                         row["rotation"], str(row["codepoint"] in lines)])
+        path = GLYPHS / f"u{row['codepoint']}.svg"
+        if not args.force and path.exists() and f'data-crop="{crop}"' in path.read_text(encoding="utf-8")[:600]:
+            kept += 1
+            continue
         mask, factor, stroke = crop_mask(row)
         ys, xs = np.where(mask > 0)
         if len(xs) == 0:
@@ -155,11 +182,11 @@ def main(argv):
         d = svg_path(trace(mask, stroke), to_units)
         name = f"u{row['codepoint']}"
         svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 {-ASCENDER} 1000 {ASCENDER - DESCENDER}" '
-               f'data-source="{row["edition"]} {row["sequence"]}" data-source-height="{(y1 - y0) / factor:.1f}" '
+               f'data-source="{row["edition"]} {row["sequence"]}" data-crop="{crop}" data-source-height="{(y1 - y0) / factor:.1f}" '
                f'data-units-per-source-pixel="{scale * factor:.3f}">\n<path d="{d}"/>\n</svg>\n')
         (GLYPHS / f"{name}.svg").write_text(svg, encoding="utf-8")
         written += 1
-    print(f"traced {written} glyphs into {GLYPHS.relative_to(ROOT)}/")
+    print(f"traced {written} glyphs into {GLYPHS.relative_to(ROOT)}/, {kept} unchanged")
     return 0
 
 

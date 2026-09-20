@@ -48,6 +48,7 @@ from trace_glyphs import frame_remnants, half_leaf
 SEAL_SOURCES = ROOT / "third_party" / "unicode" / "ucd" / "SealSources.txt"
 PROVENANCE = ROOT / "data" / "provenance" / "glyphs.csv"
 CORRECTIONS = ROOT / "data" / "corrections.csv"
+APPROVED = ROOT / "data" / "approved.csv"
 FIELDS = ["codepoint", "edition", "sequence", "commons_title", "page", "side", "rotation", "crop_x0", "crop_x1",
           "x", "y", "w", "h", "render_width", "frame_top", "pitch", "kind", "score", "juan", "radical", "similarity", "status"]
 MATCH_FLOOR = 0.5   # similarity below which pairing two shapes costs more than it gains
@@ -82,13 +83,14 @@ def load_corrections(edition):
     data/corrections.csv holds the human fixes to the segmentation, in the
     coordinates of the deskewed half-leaf (as in the page JSON and proofs):
     `reject` drops the detected seal overlapping the box, `add` inserts a seal
-    the segmenter missed.
+    the segmenter missed, `assign` makes the box a given code point, and `not`
+    says the box is not that code point (it may well be another seal).
     """
     table = defaultdict(list)
     if CORRECTIONS.exists():
         with CORRECTIONS.open(encoding="utf-8", newline="") as fh:
             for row in csv.DictReader(fh):
-                if row["edition"] == edition and row["action"] in ("reject", "add", "assign"):
+                if row["edition"] == edition and row["action"] in ("reject", "add", "assign", "not"):
                     row["box"] = [int(row["x"]), int(row["y"]), int(row["x"]) + int(row["w"]), int(row["y"]) + int(row["h"])]
                     table[(row["commons_title"], int(row["page"]), row["side"])].append(row)
     return table
@@ -101,31 +103,68 @@ def box_iou(a, b):
     return inter / max(1, (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
 
 
-def apply_corrections(half, fixes, used):
-    seals = list(half["seals"])
+def pin(seals, rules, box, codepoint, kind):
+    """Make `box` the seal of `codepoint`: take over the detection it overlaps, or insert one."""
+    for seal in seals:
+        if box_iou(seal["box"], box) > 0.3:
+            seal.update(box=box, assign=codepoint, kind=kind)
+            return True
+    centre = (box[0] + box[2]) / 2
+    for c in range(len(rules) - 1):
+        if rules[c] <= centre < rules[c + 1]:
+            seals.append({"column": len(rules) - 1 - c, "box": box, "kind": kind, "score": 1.0, "assign": codepoint})
+            return True
+    return False
+
+
+def apply_corrections(half, fixes, used, locked=()):
+    seals = [dict(s) for s in half["seals"]]
     rules = half["geometry"]["rules"]
     for fix in fixes:
-        if fix["action"] == "assign":
-            for seal in seals:
-                if box_iou(seal["box"], fix["box"]) > 0.5:
-                    seal["assign"] = int(fix["codepoint"], 16)
+        if fix["action"] == "not":
+            # a later "this is not X" also withdraws an earlier "this is X" for the same box
+            for s in seals:
+                if box_iou(s["box"], fix["box"]) > 0.5:
+                    s.setdefault("forbid", []).append(int(fix["codepoint"], 16))
+                    if s.get("assign") == int(fix["codepoint"], 16):
+                        del s["assign"]
                     used.add(id(fix))
         elif fix["action"] == "reject":
             kept = [s for s in seals if box_iou(s["box"], fix["box"]) <= 0.5]
             if len(kept) < len(seals):
                 used.add(id(fix))
             seals = kept
-        else:
-            centre = (fix["box"][0] + fix["box"][2]) / 2
-            for c in range(len(rules) - 1):
-                if rules[c] <= centre < rules[c + 1] and all(box_iou(s["box"], fix["box"]) <= 0.5 for s in seals):
-                    seals.append({"column": len(rules) - 1 - c, "box": fix["box"], "kind": "manual", "score": 1.0,
-                                  **({"assign": int(fix["codepoint"], 16)} if fix.get("codepoint") else {})})
-                    used.add(id(fix))
+        elif fix.get("codepoint"):  # assign, or add with a code point
+            if pin(seals, rules, fix["box"], int(fix["codepoint"], 16), "manual"):
+                used.add(id(fix))
+        elif fix["action"] == "add":
+            if all(box_iou(s["box"], fix["box"]) <= 0.5 for s in seals):
+                centre = (fix["box"][0] + fix["box"][2]) / 2
+                for c in range(len(rules) - 1):
+                    if rules[c] <= centre < rules[c + 1]:
+                        seals.append({"column": len(rules) - 1 - c, "box": fix["box"], "kind": "manual", "score": 1.0})
+                        used.add(id(fix))
+    for row in locked:  # approved glyphs are fixed points, whatever the segmenter now says
+        box = [int(row["x"]), int(row["y"]), int(row["x"]) + int(row["w"]), int(row["y"]) + int(row["h"])]
+        pin(seals, rules, box, int(row["codepoint"], 16), "approved")
+        for seal in seals:
+            if seal.get("assign") == int(row["codepoint"], 16) and seal["kind"] == "approved":
+                seal["locked_row"] = row
     return seals
 
 
-def detected_stream(edition, entry, block, corrections, used, halves=None):
+def load_approved(edition):
+    """{(Commons title, page, side): [provenance row, ...]} of the glyphs a reviewer approved."""
+    table = defaultdict(list)
+    if APPROVED.exists():
+        with APPROVED.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                if row["edition"] == edition:
+                    table[(row["commons_title"], int(row["page"]), row["side"])].append(row)
+    return table
+
+
+def detected_stream(edition, entry, block, corrections, used, halves=None, approved=None):
     """Seals and tally markers of one 卷 in reading order."""
     slug = slugify(entry["commons_title"])
     stream = []
@@ -142,7 +181,7 @@ def detected_stream(edition, entry, block, corrections, used, halves=None):
                 halves[(page, half["side"])] = {**half, "render_width": record["render_width"]}
             seals = defaultdict(list)
             fixes = corrections.get((entry["commons_title"], page, half["side"]), [])
-            for seal in apply_corrections(half, fixes, used):
+            for seal in apply_corrections(half, fixes, used, (approved or {}).get((entry["commons_title"], page, half["side"]), ())):
                 seals[seal["column"]].append(seal)
             for column in half["columns"]:
                 found = sorted(seals[column["column"]], key=lambda s: s["box"][1])
@@ -190,6 +229,27 @@ def match_tallies(tally_counts, expected_counts, total):
     return chosen[::-1]
 
 
+def strip_side_rules(ink):
+    """Blank a column rule caught at the side of a crop.
+
+    A rule is 2–3 px wide (seal strokes are about 8) and stands clear of the
+    glyph; left in, it widens the tight crop and ruins the comparison.
+    """
+    ink = ink.copy()
+    filled = ink.any(0)
+    for view, cols in ((ink, filled), (ink[:, ::-1], filled[::-1])):
+        on = np.flatnonzero(cols[:12])
+        if len(on) == 0:
+            continue
+        start = on[0]
+        end = start
+        while end + 1 < len(cols) and cols[end + 1]:
+            end += 1
+        if end - start + 1 <= 4 and end + 5 < len(cols) and not cols[end + 1:end + 5].any():
+            view[:, start:end + 1] = False
+    return ink
+
+
 def shape_vectors(edition, entry, seals):
     """Comparison vectors of the detected seals, cut from the cached pages."""
     vectors = []
@@ -210,7 +270,7 @@ def shape_vectors(edition, entry, seals):
             strip = ink.astype(np.uint8)
             blank_frame_rows(strip, reach=20)
             ink = strip > 0
-        vector = normalise(ink)
+        vector = normalise(strip_side_rules(ink))
         vectors.append(vector if vector is not None else np.zeros(SIZE[0] * SIZE[1], np.float32))
     return np.array(vectors)
 
@@ -235,7 +295,7 @@ def refine_box(edition, entry, seal, target):
         for b in range(a + int(geometry["slot"] * 1.2), min(mask.shape[0], a + int(geometry["slot"] * 2.3)) + 1, 3):
             window = mask[a:b]
             rows = np.where(window.any(1))[0]
-            vector = normalise(window) if len(rows) else None
+            vector = normalise(strip_side_rules(window)) if len(rows) else None
             if vector is None:
                 continue
             similarity = float(shifted_similarity(vector[None], target[None], reach=1)[0, 0])
@@ -255,7 +315,7 @@ def best_window(mask, slot, target, step=3):
             # a speck scales up to anything; a seal fills most of its two slots
             if len(rows) == 0 or rows[-1] - rows[0] < slot * 0.9 or window.mean() < 0.05:
                 continue
-            vector = normalise(window)
+            vector = normalise(strip_side_rules(window))
             if vector is None:
                 continue
             similarity = float(shifted_similarity(vector[None], target[None], reach=1)[0, 0])
@@ -389,9 +449,10 @@ def main(argv):
 
     rows, report, done_juan, verified, review = [], [], set(), [], []
     corrections, used = load_corrections(args.edition), set()
+    approved = load_approved(args.edition)
     for entry, block in manifest_blocks(manifest, args.edition, args.juan):
         halves = {}
-        stream = detected_stream(args.edition, entry, block, corrections, used, halves)
+        stream = detected_stream(args.edition, entry, block, corrections, used, halves, approved)
         if not stream:
             print(f"{block['juan']}: no segmentation output yet, skipped", file=sys.stderr)
             continue
@@ -407,12 +468,20 @@ def main(argv):
                                             np.array([reference.get(w[0], blank) for w in wanted]))
             index_of = {cp: j for j, (_, cp, _) in enumerate(wanted)}
             forced = {i: index_of[seal["assign"]] for i, seal in enumerate(seals) if seal.get("assign") in index_of}
+            for i, seal in enumerate(seals):  # pairs a reviewer ruled out
+                for cp in seal.get("forbid", ()):
+                    if cp in index_of:
+                        similarity[i, index_of[cp]] = -1.0
             pairs, extra, missing = align_shapes(similarity.copy(), forced)
             counts = defaultdict(int)
             paired = {j: i for i, j in pairs}
             for i, j in pairs:
                 sequence, cp, radical = wanted[j]
                 sim = float(similarity[i, j])
+                if seals[i].get("locked_row") and i in forced:
+                    rows.append({**{k: seals[i]["locked_row"].get(k, "") for k in FIELDS}, "status": "approved"})
+                    counts["approved"] += 1
+                    continue
                 if sim < REFINE_BELOW and sequence in reference and seals[i]["kind"] != "manual":
                     box, better = refine_box(args.edition, entry, seals[i], reference[sequence])
                     if box is not None and better > sim + 0.05:
@@ -441,7 +510,7 @@ def main(argv):
             mine.sort(key=lambda r: r["sequence"])
             for before_row, row, after_row in zip(mine, mine[1:], mine[2:]):
                 if (row["status"] == "inferred" and row["kind"] == "headword" and float(row["similarity"]) >= 0.5
-                        and before_row["status"] in ("aligned", "manual") and after_row["status"] in ("aligned", "manual")
+                        and before_row["status"] in ("aligned", "manual", "approved") and after_row["status"] in ("aligned", "manual", "approved")
                         and before_row.get("promoted") is None and after_row.get("promoted") is None):
                     row["status"], row["promoted"] = "aligned", True
                     counts["promoted"] += 1
@@ -460,6 +529,8 @@ def main(argv):
                 if sequence in reference:
                     found = search_missing(args.edition, entry, halves, near,
                                            seals[before[later]] if later is not None else None, reference[sequence])
+                    if found and any(cp in s.get("forbid", ()) and box_iou(s["box"], found["box"]) > 0.5 for s in seals):
+                        found = None
                     if found:
                         counts["recovered"] += 1
                         rows.append(provenance_row(args.edition, entry, block, found, "aligned", prefix, sequence, cp,
@@ -468,7 +539,7 @@ def main(argv):
                 review.append({"juan": block["juan"], "codepoint": f"{cp:05X}", "sequence": f"{prefix}{sequence:05d}",
                                "after": {"page": near["page"], "side": near["side"], "box": near["box"],
                                          "codepoint": f"{wanted[previous][1]:05X}"} if near else None})
-            report.append(f"  shape alignment: {counts['aligned']} aligned, {counts['inferred']} inferred (low similarity, "
+            report.append(f"  shape alignment: {counts['approved']} approved (locked), {counts['aligned']} aligned, {counts['inferred']} inferred (low similarity, "
                           f"check in proof), {counts['manual']} manual, {counts['refined']} boxes re-fitted, {len(extra)} detections rejected, "
                           f"{counts['replaced']} false detections replaced and {counts['recovered']} missed seals recovered by search, {len(missing) - counts['recovered']} still missing")
             for item in review:
@@ -511,9 +582,15 @@ def main(argv):
     with PROVENANCE.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDS, lineterminator="\n", restval="")
         writer.writeheader()
-        writer.writerows(kept + rows)
+        # a run may cover only some 卷: keep the rest, and keep the file in book order
+        order = {block["juan"]: k for k, (_, block) in enumerate(manifest_blocks(manifest, args.edition, None))}
+        writer.writerows(sorted(kept + rows, key=lambda r: order.get(r["juan"], len(order))))
     out = BUILD / "alignment"
     out.mkdir(parents=True, exist_ok=True)
+    missing_path = out / f"{args.edition}-missing.json"
+    if missing_path.exists():
+        review = [m for m in json.loads(missing_path.read_text(encoding="utf-8")) if m["juan"] not in done_juan] + review
+        review.sort(key=lambda m: m["codepoint"])
     (out / f"{args.edition}-missing.json").write_text(json.dumps(review, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     (out / f"{args.edition}-report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
     print("\n".join(report))

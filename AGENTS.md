@@ -98,10 +98,19 @@ each edition, in reading order. The pipeline relies on this:
   follows. The chart images are a check only and stay in the git-ignored
   cache; see the source material rules. 陳昌治本 has no regular-script
   headword under the seal, so OCR against `kSEAL_MCJK` does not apply to it.
+- `data/approved.csv` holds the glyphs a reviewer approved in
+  `scripts/review_server.py`. They are locked: `align_sequence.py` pins them
+  and writes their rows back verbatim. Never edit or regenerate those rows;
+  only the reviewer unlocks them. Read `data/review_feedback.csv` for the
+  reviewer's free-text notes before changing the pipeline.
 - What the machine is unsure about goes to a human, quickly: low-similarity
   pairs (`inferred`), rejected detections and missing seals are listed in the
   proof, and the decision is one line in `data/corrections.csv`
-  (`reject` / `add` / `assign`). Never silently accept or guess.
+  (`reject` / `add` / `assign` / `not`; `not` means "this box is not that
+  code point", the box stays available for another seal). Never silently
+  accept or guess.
+- Page numbers restart in every Commons file. Key anything per half-leaf by
+  (Commons title, page, side), never by page and side alone.
 
 ## Font build conventions
 
