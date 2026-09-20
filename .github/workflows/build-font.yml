@@ -1,0 +1,86 @@
+# Build the fonts from the committed outlines. No scans are needed: glyphs/,
+# data/overrides/ and the vendored SealSources.txt are the only inputs.
+#
+# - every push and pull request that touches the inputs: build, then offer the
+#   TTF/OTF files and a specimen PNG as the "fonts" artifact of the run
+# - a tag v<version>: the same build with that version number, attached to a
+#   GitHub release together with the licence and the third-party notices
+# - "Run workflow" on the Actions page builds any branch on demand
+name: Build font
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "glyphs/**"
+      - "data/**"
+      - "scripts/build_font.py"
+      - "scripts/specimen.py"
+      - "scripts/verify_seal_sources.py"
+      - "third_party/unicode/ucd/**"
+      - ".github/workflows/build-font.yml"
+  pull_request:
+    paths:
+      - "glyphs/**"
+      - "data/**"
+      - "scripts/build_font.py"
+      - "scripts/specimen.py"
+      - "scripts/verify_seal_sources.py"
+      - "third_party/unicode/ucd/**"
+      - ".github/workflows/build-font.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install fontTools and Pillow
+        run: pip install "fonttools>=4.50" "Pillow>=10.0"
+      - name: Verify the vendored SealSources.txt
+        run: python scripts/verify_seal_sources.py
+      - name: Build
+        run: |
+          version=0.001
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          python scripts/build_font.py --version "$version"
+      - name: Specimen
+        run: |
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk  # captions only
+          python scripts/specimen.py
+      - name: Collect the files
+        run: |
+          mkdir -p dist/KaiyuanSmallSeal
+          cp build/KaiyuanSmallSeal*-Regular.ttf build/KaiyuanSmallSeal*-Regular.otf dist/KaiyuanSmallSeal/
+          cp OFL.txt THIRD_PARTY_NOTICES.md build/specimen.png dist/KaiyuanSmallSeal/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fonts
+          path: dist/KaiyuanSmallSeal
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fonts
+          path: KaiyuanSmallSeal
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip -r "KaiyuanSmallSeal-${GITHUB_REF_NAME}.zip" KaiyuanSmallSeal
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes \
+            "KaiyuanSmallSeal-${GITHUB_REF_NAME}.zip" KaiyuanSmallSeal/*.ttf KaiyuanSmallSeal/*.otf

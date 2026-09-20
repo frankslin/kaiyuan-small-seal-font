@@ -18,6 +18,7 @@ Usage:
 import argparse
 import re
 import sys
+from pathlib import Path
 
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.areaPen import AreaPen
@@ -29,7 +30,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.svgLib.path import parse_path
 
-from fetch_pages import ROOT
+ROOT = Path(__file__).resolve().parent.parent  # no import from the scan stages: CI builds with fontTools alone
 
 GLYPHS = ROOT / "glyphs"
 OVERRIDES = ROOT / "data" / "overrides"
