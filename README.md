@@ -78,15 +78,31 @@ python3 scripts/review_server.py                  # 開 http://127.0.0.1:8765/
 
 ## 相關專案與資料
 
-既有的小篆字型或在授權上有限制，或收字不足，這也是本專案從公版刻本重新描字的原因。以下字型與資料僅供對照、查核，不作為本專案的描字來源（見 `AGENTS.md` 的底本規則）。
+既有的小篆字型或在授權上有限制，或收字不足，或字形來源無從查核，這也是本專案從公版刻本重新描字的原因。以下字型與資料僅供對照、查核，不作為本專案的描字來源（見 `AGENTS.md` 的底本規則）。字數與授權除另註者外，依中文維基百科用戶「魔琴」整理的[已知的小篆字體](https://zh.wikipedia.org/wiki/User:%E9%AD%94%E7%90%B4/%E8%B5%84%E6%96%99/%E5%B7%B2%E7%9F%A5%E7%9A%84%E5%B0%8F%E7%AF%86%E5%AD%97%E4%BD%93)一頁（2026 年 9 月查閱）。
 
-- **崇羲篆體**（季旭昇，中央研究院「小學堂」）：<https://xiaoxue.iis.sinica.edu.tw/chongxi/>。授權為 CC BY-ND 3.0 TW。作者說明：「崇羲篆體為義務製作，未曾接受任何補助，完成後採公眾授權無償供各界使用，為求其後續被更新使用之正確性，整體字型禁止被修改，然字形書寫、體例要求難免有顧此失彼，不夠完善之處，歡迎使用者提供修改方面的各項建議意見。」因禁止改作，不能作為衍生字型的基礎。
-- **北師大說文小篆**（BeiShiDaShuoWenXiaoZhuan）：流通頁面如 <https://www.fonts.net.cn/font-32320121887.html>。目前沒有找到官方公開的完整授權條款，故不使用。
-- **華瑞小篆體**：作者自己明確說明「沒有取得北師大的授權」，故不使用。
-- **霞鶩篆書**（LXGW Seal）：<https://github.com/lxgw/LxgwSeal>。授權為 SIL Open Font License 1.1，與本專案相同，但收字過少（收字表見 <https://github.com/lxgw/LxgwSeal/blob/main/documentation/table.md>），無法覆蓋篆書區塊。
+| 字型 | 字數 | 授權 | 與本專案的關係 |
+| --- | --- | --- | --- |
+| **崇羲篆體**（中央研究院「小學堂」） | 11,596 | CC BY-ND 3.0 TW | 禁止改作，不能作為衍生字型的基礎 |
+| **全字庫說文解字** | 6,721 | 政府資料開放授權條款第 1 版 | 掛在全字庫／CJK 碼位上，不在篆書區塊；收字不足 |
+| **北師大說文小篆**（BeiShiDaShuoWenXiaoZhuan） | 11,101 | 未見官方公開的完整授權條款 | 授權不明，不使用 |
+| **華瑞小篆體** | 未詳 | 作者自述「沒有取得北師大的授權」 | 不使用 |
+| **Seal Sans**（Ghimist） | 11,328 | AGPL-3.0 | 字數與篆書區塊相同；授權與 OFL 不相容 |
+| **Seal Hanzi**（Richard S. Cook） | 11,246 | 專有 | 不使用 |
+| **霞鶩篆書**（LXGW Seal） | 60 | SIL OFL 1.1 | 授權相同，但收字過少（[收字表](https://github.com/lxgw/LxgwSeal/blob/main/documentation/table.md)） |
+
+- **崇羲篆體**：<https://xiaoxue.iis.sinica.edu.tw/chongxi/>。季旭昇撰文說明，字型主要由王心怡製作，謝清俊、莊德明協助。說明原文：「崇羲篆體為義務製作，未曾接受任何補助，完成後採公眾授權無償供各界使用，為求其後續被更新使用之正確性，整體字型禁止被修改，然字形書寫、體例要求難免有顧此失彼，不夠完善之處，歡迎使用者提供修改方面的各項建議意見。」
+- **北師大說文小篆**：流通頁面如 <https://www.fonts.net.cn/font-32320121887.html>。
+- **霞鶩篆書**：<https://github.com/lxgw/LxgwSeal>。
 - **小學堂文字學資料庫**：中央研究院數位文化中心技術報告〈小學堂文字學資料庫的研發與應用〉，<https://xiaoxue.iis.sinica.edu.tw/Content/Files/xiaoxue-Technical_Report.pdf>，可了解小學堂字形資料的建置方式。
 - **[OpenCC](https://github.com/BYVoid/OpenCC)**：姊妹專案。`t2seal`、`s2seal`、`seal2t` 配置與 `SealCharacters.txt`、`SealVariants.txt` 字典由同一份 `SealSources.txt` 產生，負責現代漢字與篆書碼位之間的轉換；本專案的樣張與相容版字型的取捨規則與之一致。
 - **Unicode 18.0 篆書區塊**：`SealSources.txt`（UAX #60）與碼表 <https://www.unicode.org/charts/PDF/Unicode-18.0/U180-3D000.pdf>。碼表字形只用於核對碼位，不作為描字來源。
+
+### 本專案的定位
+
+- **碼位涵蓋**：目標是 Unicode 18.0 篆書區塊（U+3D000..U+3FC3F）全部 11,328 個碼位，正篆與重文都收，字形掛在篆書區塊上，另出相容版。
+- **來源可追溯**：每個字形都記錄版本、Commons 檔案、頁碼與切片框（`data/provenance/glyphs.csv`），任何人都能拿輪廓和掃描對照。
+- **公版底本**：字形由公版刻本的掃描描出，不參考現代篆書字型，著作權狀態清楚，可依 OFL 自由修改、再發行。
+- **可重跑的管線**：切字、對位、描字、建字型都可重跑；人工判斷以 `data/corrections.csv`、`data/approved.csv`、`data/overrides/` 的形式保存，便於社群貢獻與版本迭代。
 
 ## 授權
 
