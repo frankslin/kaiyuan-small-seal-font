@@ -1,4 +1,4 @@
-# 開源小篆 Kaiyuan Small Seal Font
+# 開元小篆 Kaiyuan Small Seal Font
 
 一套以《說文解字》公版影印本為底、覆蓋 Unicode 18.0 篆書區塊（Seal，U+3D000..U+3FC3F，共 11,328 字）的開源小篆字型。字形由古籍掃描切字、向量化而來，每個字形都記錄出處；字型以 SIL Open Font License 1.1 發行。
 
@@ -76,6 +76,18 @@ python3 scripts/review_server.py                  # 開 http://127.0.0.1:8765/
 1. **Kaiyuan Small Seal**：字形掛在 Unicode 篆書區塊碼位上，是主字型。搭配 [OpenCC](https://github.com/BYVoid/OpenCC) 的 `t2seal` 配置可把繁體文字轉成篆書碼位後顯示。
 2. **相容版**：同一套字形掛在現代漢字碼位上，供尚未支援 Unicode 18.0 的環境使用。一個漢字對應多個篆字時，取捨規則與 OpenCC `SealCharactersRev` 的正篆優先、`@reverse-prefer` 例外一致。
 
+## 相關專案與資料
+
+既有的小篆字型或在授權上有限制，或收字不足，這也是本專案從公版刻本重新描字的原因。以下字型與資料僅供對照、查核，不作為本專案的描字來源（見 `AGENTS.md` 的底本規則）。
+
+- **崇羲篆體**（季旭昇，中央研究院「小學堂」）：<https://xiaoxue.iis.sinica.edu.tw/chongxi/>。授權為 CC BY-ND 3.0 TW。作者說明：「崇羲篆體為義務製作，未曾接受任何補助，完成後採公眾授權無償供各界使用，為求其後續被更新使用之正確性，整體字型禁止被修改，然字形書寫、體例要求難免有顧此失彼，不夠完善之處，歡迎使用者提供修改方面的各項建議意見。」因禁止改作，不能作為衍生字型的基礎。
+- **北師大說文小篆**（BeiShiDaShuoWenXiaoZhuan）：流通頁面如 <https://www.fonts.net.cn/font-32320121887.html>。目前沒有找到官方公開的完整授權條款，故不使用。
+- **華瑞小篆體**：作者自己明確說明「沒有取得北師大的授權」，故不使用。
+- **霞鶩篆書**（LXGW Seal）：<https://github.com/lxgw/LxgwSeal>。授權為 SIL Open Font License 1.1，與本專案相同，但收字過少（收字表見 <https://github.com/lxgw/LxgwSeal/blob/main/documentation/table.md>），無法覆蓋篆書區塊。
+- **小學堂文字學資料庫**：中央研究院數位文化中心技術報告〈小學堂文字學資料庫的研發與應用〉，<https://xiaoxue.iis.sinica.edu.tw/Content/Files/xiaoxue-Technical_Report.pdf>，可了解小學堂字形資料的建置方式。
+- **[OpenCC](https://github.com/BYVoid/OpenCC)**：姊妹專案。`t2seal`、`s2seal`、`seal2t` 配置與 `SealCharacters.txt`、`SealVariants.txt` 字典由同一份 `SealSources.txt` 產生，負責現代漢字與篆書碼位之間的轉換；本專案的樣張與相容版字型的取捨規則與之一致。
+- **Unicode 18.0 篆書區塊**：`SealSources.txt`（UAX #60）與碼表 <https://www.unicode.org/charts/PDF/Unicode-18.0/U180-3D000.pdf>。碼表字形只用於核對碼位，不作為描字來源。
+
 ## 授權
 
 - 字型：SIL Open Font License 1.1（字型產出後隨附 `OFL.txt`）。
@@ -89,7 +101,7 @@ python3 scripts/review_server.py                  # 開 http://127.0.0.1:8765/
 
 ## English summary
 
-Kaiyuan Small Seal (開源小篆, "open-source small seal") aims to give every
+Kaiyuan Small Seal (開元小篆) aims to give every
 code point of the Unicode 18.0 Seal block a glyph traced from public-domain
 scans of the 說文解字, with per-glyph provenance. The Unicode `SealSources.txt`
 file supplies, for each code point, its running sequence number in four
