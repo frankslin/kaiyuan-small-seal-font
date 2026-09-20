@@ -40,6 +40,14 @@ BUILD = ROOT / "build"
 UPM, ASCENDER, DESCENDER = 1000, 880, -120
 FIRST, LAST = 0x3D000, 0x3FC3F
 FAMILY = "Kaiyuan Small Seal"
+FAMILY_LOCAL = {"zh-TW": "開元小篆", "zh-HK": "開元小篆", "zh": "开元小篆"}  # 開元, not 開源
+COMPAT_LOCAL = {"zh-TW": "開元小篆 相容版", "zh-HK": "開元小篆 相容版", "zh": "开元小篆 兼容版"}
+COPYRIGHT = "Copyright (c) 2026 Kaiyuan Small Seal Font Contributors (https://github.com/frankslin/kaiyuan-small-seal-font)"  # as in OFL.txt
+URL = "https://github.com/frankslin/kaiyuan-small-seal-font"
+DESCRIPTION = ("Small Seal Script (小篆) for the Unicode 18.0 Seal block, traced from public-domain scans of the "
+               "陳昌治 edition (1873) of the 說文解字 on Wikimedia Commons. Every glyph records its source page and crop box.")
+COMPAT_NOTE = " This compatibility font maps the modern characters of kSEAL_MCJK to the same glyphs."
+VENDOR = "NONE"  # no registered OpenType vendor ID
 
 
 def read_outline(path):
@@ -80,14 +88,26 @@ def modern_map(available):
     return mapping
 
 
-def build(outlines, cmap, family, version, stem):
+def name_strings(family, local, version):
+    """Name table records; family and full names also in Chinese for Windows and macOS menus."""
+    localised = lambda english, suffix="": {"en": english + suffix, **{tag: name for tag, name in local.items()}}
+    return {"copyright": COPYRIGHT,
+            "familyName": localised(family), "styleName": "Regular",
+            "uniqueFontIdentifier": f"{version};{VENDOR};{family.replace(' ', '')}-Regular",
+            "fullName": localised(family, " Regular"), "version": f"Version {version}",
+            "psName": family.replace(" ", "") + "-Regular",
+            "manufacturer": "Kaiyuan Small Seal Font Contributors",
+            "description": DESCRIPTION + (COMPAT_NOTE if "Compat" in family else ""),
+            "vendorURL": URL,
+            "licenseDescription": ("This Font Software is licensed under the SIL Open Font License, Version 1.1. "
+                                   "This license is available with a FAQ at: https://openfontlicense.org"),
+            "licenseInfoURL": "https://openfontlicense.org"}
+
+
+def build(outlines, cmap, family, local, version, stem, modern=False):
     order = [".notdef"] + sorted(outlines)
     metrics = {name: (UPM, 0) for name in order}
-    names = {"familyName": family, "styleName": "Regular", "uniqueFontIdentifier": f"{family} {version}",
-             "fullName": f"{family} Regular", "version": f"Version {version}",
-             "psName": family.replace(" ", "") + "-Regular",
-             "licenseDescription": "This Font Software is licensed under the SIL Open Font License, Version 1.1.",
-             "licenseInfoURL": "https://openfontlicense.org"}
+    names = name_strings(family, local, version)
     for is_ttf in (True, False):
         fb = FontBuilder(UPM, isTTF=is_ttf)
         fb.setupGlyphOrder(order)
@@ -105,12 +125,20 @@ def build(outlines, cmap, family, version, stem):
         if is_ttf:
             fb.setupGlyf(drawn)
         else:
-            fb.setupCFF(names["psName"], {"FullName": names["fullName"]}, drawn, {})
+            fb.setupCFF(names["psName"], {"FullName": names["fullName"]["en"], "FamilyName": family, "Weight": "Regular",
+                                          "Notice": COPYRIGHT, "version": version}, drawn, {})
         fb.setupHorizontalMetrics(metrics)
         fb.setupHorizontalHeader(ascent=ASCENDER, descent=DESCENDER)
         fb.setupNameTable(names)
-        fb.setupOS2(sTypoAscender=ASCENDER, sTypoDescender=DESCENDER, usWinAscent=ASCENDER, usWinDescent=-DESCENDER)
+        # fsType 0: the OFL allows embedding without restriction. fsSelection: REGULAR | USE_TYPO_METRICS.
+        # Unicode range bit 57 (non-plane-0) for the Seal block; the compatibility font adds CJK Unified
+        # Ideographs (59) and the Chinese code pages (18 simplified, 20 traditional).
+        fb.setupOS2(sTypoAscender=ASCENDER, sTypoDescender=DESCENDER, usWinAscent=ASCENDER, usWinDescent=-DESCENDER,
+                    sTypoLineGap=0, fsType=0, fsSelection=0x40 | 0x80, version=4, achVendID=VENDOR,
+                    ulUnicodeRange2=(1 << 25) | ((1 << 27) if modern else 0),
+                    ulCodePageRange1=((1 << 18) | (1 << 20)) if modern else 0)
         fb.setupPost()
+        fb.font["head"].fontRevision = float(re.match(r"\d+(?:\.\d+)?", version).group(0))
         path = BUILD / f"{stem}.{'ttf' if is_ttf else 'otf'}"
         fb.save(path)
         print(f"wrote {path.relative_to(ROOT)}  ({len(order) - 1} glyphs, {len(cmap)} mapped code points)")
@@ -153,8 +181,9 @@ def main(argv):
 
     BUILD.mkdir(exist_ok=True)
     primary = {int(name[1:], 16): name for name in outlines}
-    build(outlines, primary, FAMILY, args.version, "KaiyuanSmallSeal-Regular")
-    build(outlines, modern_map(set(outlines)), FAMILY + " Compat", args.version, "KaiyuanSmallSealCompat-Regular")
+    build(outlines, primary, FAMILY, FAMILY_LOCAL, args.version, "KaiyuanSmallSeal-Regular")
+    build(outlines, modern_map(set(outlines)), FAMILY + " Compat", COMPAT_LOCAL, args.version,
+          "KaiyuanSmallSealCompat-Regular", modern=True)
     return 0
 
 
