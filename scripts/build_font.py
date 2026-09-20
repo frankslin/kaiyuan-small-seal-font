@@ -73,8 +73,8 @@ def modern_map(available):
                 modern, seal = line.split()[:2]
                 prefer[int(modern, 16)] = int(seal, 16)
     mapping = {}
-    for modern, seals in candidates.items():
-        chosen = prefer.get(modern, min(seals))  # lowest code point is the headword
+    for modern in candidates.keys() | prefer.keys():  # a preference may name a modern character kSEAL_MCJK lacks (玉)
+        chosen = prefer.get(modern) or min(candidates[modern])  # lowest code point is the headword
         if f"u{chosen:05X}" in available:
             mapping[modern] = f"u{chosen:05X}"
     return mapping

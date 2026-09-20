@@ -1,0 +1,8 @@
+# Seals the compatibility font prefers over the lowest code point, as <modern hex> <seal hex>.
+# Kept in step with OpenCC data/dictionary/SealCharacters.txt (BYVoid/OpenCC ef9748b6):
+# its @reverse-prefer lines, and U+3D06D mapped to 玉 (kSEAL_MCJK says 王, which is U+3D068).
+53E1 3DB79  # 叡
+23024 3F8D6  # 𣀤
+6B56 3E908  # 歖
+5B4C 3F4EA  # 孌
+7389 3D06D  # 玉

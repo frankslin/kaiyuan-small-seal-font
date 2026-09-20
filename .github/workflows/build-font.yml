@@ -51,7 +51,15 @@ jobs:
           version=0.001
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF_NAME#v}"; fi
           python scripts/build_font.py --version "$version"
+      - name: Fetch OpenCC's seal dictionaries
+        uses: actions/checkout@v4
+        with:
+          repository: BYVoid/OpenCC
+          path: opencc
+          sparse-checkout: data/dictionary
       - name: Specimen
+        env:
+          OPENCC_DIR: opencc
         run: |
           sudo apt-get install -y --no-install-recommends fonts-noto-cjk  # captions only
           python scripts/specimen.py
