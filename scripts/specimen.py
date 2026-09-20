@@ -48,6 +48,7 @@ def main(argv):
     parser.add_argument("--font", type=Path, default=FONT)
     parser.add_argument("--out", type=Path, default=ROOT / "build" / "specimen.png")
     args = parser.parse_args(argv)
+    args.out = args.out.resolve()
     if not args.font.exists():
         print(f"missing {args.font}; run build_font.py", file=sys.stderr)
         return 1
@@ -77,7 +78,7 @@ def main(argv):
             draw.text((x + CELL / 2, y + CELL + 28), ch, font=caption_font, fill=INK if cp in covered else FAINT, anchor="mm")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.out)
-    print(f"wrote {args.out.relative_to(ROOT)} ({len(args.text) - len(missing)} of {len(args.text)} characters set)")
+    print(f"wrote {args.out.relative_to(ROOT) if args.out.is_relative_to(ROOT) else args.out} ({len(args.text) - len(missing)} of {len(args.text)} characters set)")
     for item in missing:
         print(f"  no glyph: {item}")
     return 0
