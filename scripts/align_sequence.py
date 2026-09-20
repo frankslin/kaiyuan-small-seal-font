@@ -56,6 +56,8 @@ GAP = -0.05         # two gaps beat a pair whose similarity is under MATCH_FLOOR
 CONFIDENT = 0.65    # similarity from which a pair is `aligned` rather than `inferred`
 CONFIDENT_INLINE = 0.78  # the same for inline detections, which regular script can mimic
 REFINE_BELOW = 0.8  # pairs matching worse than this get their crop box re-fitted
+WIDEN_BELOW = 0.9   # below this, try moving the sides of the box within its column
+WIDEN_PAST_RULE = 10  # pixels a box may reach past the fitted column rule
 RECOVER_FROM = 0.85 # similarity a searched-for missing seal must reach to be added
 TALLY_INDENT = 2.5  # slots; 說解 continuation is indented 1, 新附 seals 2
 
@@ -305,6 +307,45 @@ def refine_box(edition, entry, seal, target):
     return best
 
 
+def widen_box(edition, entry, seal, target):
+    """Move the sides of a box within its column for the best match.
+
+    The segmenter's ink box sometimes stops at a gap inside the seal and
+    leaves out a component at the side (the right half of 朕). Every pair of
+    sides between (and a little past) the column rules is tried, in steps,
+    with the rows as they are or a few pixels more.
+    Returns (box, similarity).
+    """
+    geometry = seal["geometry"]
+    half = half_leaf(edition, entry["commons_title"], seal["page"], seal["render_width"],
+                     geometry["crop_x"][0], geometry["crop_x"][1], geometry["rotation"])
+    x0, y0, x1, y1 = seal["box"]
+    rules = geometry["rules"]
+    centre = (x0 + x1) / 2
+    # the fitted rules can sit some pixels off the printed ones; a rule caught in the window is stripped
+    left = max(0, max([r for r in rules if r <= centre], default=0) - WIDEN_PAST_RULE)
+    right = min(half.shape[1], min([r for r in rules if r > centre], default=half.shape[1]) + WIDEN_PAST_RULE)
+    left, right = min(left, x0), max(right, x1)
+    ink = binarize(half, strict=True) > 0
+    best = (None, -1.0)
+    for top, bottom in ((y0, y1), (y0, y1 + 6), (y0 - 6, y1), (y0 - 6, y1 + 6)):
+        top, bottom = max(0, top), min(half.shape[0], bottom)
+        mask = ink[top:bottom, left:right]
+        for a in sorted({0, x0 - left} | set(range(0, x0 - left + 9, 4))):
+            for b in sorted({x1 - left, right - left} | set(range(max(a + 20, x1 - left - 8), right - left + 1, 4))):
+                if b - a < 20:
+                    continue
+                window = strip_side_rules(mask[:, a:b])
+                rows, cols = np.where(window.any(1))[0], np.where(window.any(0))[0]
+                vector = normalise(window) if len(cols) else None
+                if vector is None:
+                    continue
+                similarity = float(shifted_similarity(vector[None], target[None], reach=1)[0, 0])
+                if similarity > best[1] + (0.0 if (top, bottom) == (y0, y1) else 0.01):  # prefer the rows as they are
+                    best = ([left + a + int(cols[0]), top + int(rows[0]), left + a + int(cols[-1]) + 1, top + int(rows[-1]) + 1], similarity)
+    return best
+
+
 def best_window(mask, slot, target, step=3):
     """Best matching two-slot-ish window of a column strip: (y0, y1, similarity)."""
     best = (0, 0, -1.0)
@@ -488,6 +529,12 @@ def main(argv):
                         seals[i] = {**seals[i], "box": box}
                         sim = better
                         counts["refined"] += 1
+                if sim < WIDEN_BELOW and sequence in reference and seals[i]["kind"] != "manual":
+                    box, better = widen_box(args.edition, entry, seals[i], reference[sequence])
+                    if box is not None and better > sim + 0.03:
+                        seals[i] = {**seals[i], "box": box}
+                        sim = better
+                        counts["widened"] += 1
                 # a headword is backed by the layout; an inline detection is not
                 confident = CONFIDENT if seals[i]["kind"] == "headword" else CONFIDENT_INLINE
                 if sim < confident and i not in forced and sequence in reference:
@@ -540,7 +587,7 @@ def main(argv):
                                "after": {"page": near["page"], "side": near["side"], "box": near["box"],
                                          "codepoint": f"{wanted[previous][1]:05X}"} if near else None})
             report.append(f"  shape alignment: {counts['approved']} approved (locked), {counts['aligned']} aligned, {counts['inferred']} inferred (low similarity, "
-                          f"check in proof), {counts['manual']} manual, {counts['refined']} boxes re-fitted, {len(extra)} detections rejected, "
+                          f"check in proof), {counts['manual']} manual, {counts['refined']} boxes re-fitted, {counts['widened']} widened, {len(extra)} detections rejected, "
                           f"{counts['replaced']} false detections replaced and {counts['recovered']} missed seals recovered by search, {len(missing) - counts['recovered']} still missing")
             for item in review:
                 if item["juan"] == block["juan"]:
