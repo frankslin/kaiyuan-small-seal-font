@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<title>Kaiyuan Small Seal 審核</title>
+<style>
+  :root { --ink: #1f1d1a; --paper: #f7f4ec; --card: #fffdf8; --line: #d9d2c0; --ok: #2f7d4f; --warn: #d9822b; --bad: #b8332a; --lock: #8a8474; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.5 system-ui, "PingFang TC", sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: #2b2722; color: #f3eee2; padding: 10px 18px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .04em; }
+  header .stat { font-size: 12px; opacity: .85; }
+  header .spacer { flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  button:hover { border-color: #9b927c; }
+  button.primary { background: var(--ok); border-color: var(--ok); color: #fff; }
+  button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .seg button { border-radius: 0; margin-left: -1px; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .seg button.on { background: #e9e1cc; font-weight: 600; }
+  main { padding: 8px 18px 80px; }
+  section h2 { font-size: 15px; margin: 22px 0 8px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 5px; }
+  section h2 small { font-weight: 400; color: #6d6656; }
+  .grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .card { width: 168px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 7px; cursor: pointer; position: relative; }
+  .card:hover { box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+  .card.inferred { border: 2px solid var(--warn); background: #fff6e8; }
+  .card.manual { border-color: var(--ok); }
+  .card.approved { opacity: .55; background: #efece3; }
+  .card.selected { outline: 3px solid var(--ok); outline-offset: -1px; }
+  .card .pair { display: flex; justify-content: space-between; align-items: center; height: 96px; }
+  .card .pair img { max-height: 92px; max-width: 72px; }
+  .card .pair img.glyph { height: 92px; width: 76px; object-fit: contain; }
+  .card .meta { font-size: 11px; color: #5b5546; display: flex; justify-content: space-between; align-items: baseline; }
+  .card .modern { font-size: 20px; color: var(--ink); }
+  .card input { position: absolute; top: 5px; left: 6px; width: 16px; height: 16px; }
+  .card .badge { position: absolute; top: 3px; right: 6px; font-size: 11px; color: var(--lock); }
+  .missing { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .missing .modern { font-size: 26px; width: 40px; text-align: center; }
+  dialog { border: none; border-radius: 10px; padding: 0; max-width: 96vw; max-height: 94vh; box-shadow: 0 10px 50px rgba(0,0,0,.4); }
+  dialog::backdrop { background: rgba(20,18,14,.55); }
+  .dlg { display: flex; gap: 0; max-height: 94vh; }
+  .stagewrap { overflow: auto; max-height: 94vh; background: #55504a; }
+  .stage { position: relative; user-select: none; cursor: crosshair; line-height: 0; }
+  .stage img { display: block; -webkit-user-drag: none; }
+  .rect { position: absolute; border: 2px solid #e5342b; background: rgba(229,52,43,.08); cursor: move; }
+  .rect i { position: absolute; width: 12px; height: 12px; background: #e5342b; border-radius: 2px; }
+  .rect i.nw { left: -7px; top: -7px; cursor: nwse-resize; } .rect i.ne { right: -7px; top: -7px; cursor: nesw-resize; }
+  .rect i.sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .rect i.se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+  .side { width: 300px; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+  .side h3 { margin: 0; font-size: 22px; } .side h3 small { font-size: 12px; color: #6d6656; font-weight: 400; }
+  .side label { font-size: 12px; color: #5b5546; }
+  .side input[type=text], .side textarea { width: 100%; font: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
+  .side .row { display: flex; gap: 6px; } .side .row > * { flex: 1; }
+  .side hr { border: none; border-top: 1px solid var(--line); width: 100%; margin: 4px 0; }
+  .side code { font-size: 12px; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #2b2722; color: #fff; padding: 8px 16px; border-radius: 8px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 20; }
+  #toast.on { opacity: .95; }
+  pre#log { background: #2b2722; color: #d9d2c0; padding: 10px; border-radius: 8px; font-size: 11px; max-height: 240px; overflow: auto; white-space: pre-wrap; }
+</style>
+
+<header>
+  <h1>開源小篆 · 審核</h1>
+  <span class="stat" id="stats"></span>
+  <span class="seg" id="filter">
+    <button data-f="todo" class="on">待處理</button><button data-f="open">未鎖定</button><button data-f="all">全部</button><button data-f="low" title="全書相似度偏低的字，由低到高；逐個按 ✓ 或 ✗">低信心總覽</button>
+  </span>
+  <label id="lowbox" style="font-size:13px" hidden>相似度 &lt; <input id="lowmax" type="number" value="0.8" min="0.3" max="1" step="0.05" style="width:56px"></label>
+  <select id="juan" title="一次只看一卷"></select>
+  <label style="font-size:13px"><input type="checkbox" id="common" checked> 只看常用字</label>
+  <button id="pick">勾選高信心（≥ 0.90）</button>
+  <span class="spacer"></span>
+  <button id="approve" class="primary" disabled>批准並鎖定所選 (0)</button>
+  <button id="rebuild">重新對位並重建</button>
+</header>
+<main>
+  <pre id="log" hidden></pre>
+  <div id="content"></div>
+</main>
+
+<dialog id="dialog">
+  <div class="dlg">
+    <div class="stagewrap"><div class="stage" id="stage"><img id="stageimg" alt=""><div class="rect" id="rect" hidden><i class="nw"></i><i class="ne"></i><i class="sw"></i><i class="se"></i></div></div></div>
+    <div class="side">
+      <h3 id="d-title"></h3>
+      <div id="d-info" style="font-size:12px;color:#5b5546"></div>
+      <div id="d-nav" class="row" hidden><button id="d-prev">← 前一半葉</button><button id="d-next">後一半葉 →</button></div>
+      <div>框：<code id="d-box"></code></div>
+      <div style="font-size:12px;color:#6d6656">框只要大致框住這個字即可：描輪廓時會自動補回框緣外 8 px 內的筆畫，並排除鄰字。只有框到別的字、或偏了半個字以上才需要調。</div>
+      <button id="d-save" class="primary">這個框就是這個字（儲存邊框）</button>
+      <div id="d-more">
+        <hr>
+        <button id="d-delete" class="danger" style="width:100%">刪除：這個切片不是這個字</button>
+        <hr>
+        <label>換成另一個字（楷書字或 U+3Dxxx）</label>
+        <div class="row"><input type="text" id="d-new" placeholder="例：禮 或 U+3D016"><button id="d-reassign" style="flex:0 0 auto">送出</button></div>
+        <hr>
+        <button id="d-unlock" hidden>解除鎖定</button>
+      </div>
+      <label>意見（會記入 data/review_feedback.csv）</label>
+      <textarea id="d-note" rows="3" placeholder="例：右下角有噪點；中間一豎不見了"></textarea>
+      <button id="d-comment">只送出意見</button>
+      <span class="spacer" style="flex:1"></span>
+      <button id="d-close">關閉</button>
+    </div>
+  </div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let S = null, filter = 'todo', selected = new Set(), ctx = null, commonOnly = true, juan = null, lowPage = 0;
+const judged = new Map();  // code point -> 'ok' | 'bad', decisions made in the low-confidence view
+const shown = x => (!commonOnly || x.common) && x.juan === juan;
+
+function toast(text) { const t = $('#toast'); t.textContent = text; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2200); }
+async function post(path, data) { const r = await fetch(path, {method: 'POST', body: JSON.stringify(data)}); return r.json(); }
+function cropUrl(g, pad, scale) {
+  const x = +g.x, y = +g.y, w = +g.w, h = +g.h;
+  return `/crop?title=${encodeURIComponent(g.commons_title)}&page=${g.page}&side=${g.side}&x0=${x - pad}&y0=${y - pad}&x1=${x + w + pad}&y1=${y + h + pad}&scale=${scale}&t=${g.x},${g.y}`;
+}
+
+async function load() {
+  S = await (await fetch('/api/state')).json();
+  const open = {}, all = [];
+  for (const x of [...S.glyphs, ...S.missing]) {
+    if (!(x.juan in open)) { open[x.juan] = 0; all.push(x.juan); }
+    if (x.status !== 'approved') open[x.juan]++;
+  }
+  if (!all.includes(juan)) juan = all.find(j => open[j]) || all[0];
+  $('#juan').innerHTML = all.map(j => `<option value="${j}"${j === juan ? ' selected' : ''}>${j}（未鎖定 ${open[j]}）</option>`).join('');
+  render();
+  if (S.rebuild.running) setTimeout(load, 2500);
+}
+
+function render() {
+  const g = S.glyphs.filter(shown), n = k => g.filter(x => x.status === k).length;
+  const missing = S.missing.filter(shown);
+  $('#stats').textContent = `已鎖定 ${n('approved')} · 已對位 ${n('aligned') + n('manual')} · 待確認 ${n('inferred')} · 沒找到 ${missing.length}` + `（${juan}${commonOnly ? '的常用字' : ''}）｜全書：已鎖定 ${S.glyphs.filter(x => x.status === 'approved').length} / ${S.glyphs.length + S.missing.length}`;
+  $('#rebuild').disabled = S.rebuild.running;
+  $('#rebuild').textContent = S.rebuild.running ? '重建中…' : '重新對位並重建';
+  $('#log').hidden = !S.rebuild.log; $('#log').textContent = S.rebuild.log;
+  const root = $('#content'); root.innerHTML = '';
+  $('#lowbox').hidden = filter !== 'low'; $('#juan').disabled = filter === 'low';
+  if (filter === 'low') { renderLow(root); updateApprove(); return; }
+
+  const todo = g.filter(x => x.status === 'inferred');
+  if (filter !== 'all' || true) {
+    if (missing.length) {
+      const sec = document.createElement('section');
+      sec.innerHTML = `<h2>沒找到的字 <small>${missing.length} 個 · 按「在頁面上框選」直接指出位置</small></h2>`;
+      for (const m of missing) {
+        const row = document.createElement('div'); row.className = 'missing';
+        const where = m.after ? `應在 U+${m.after.codepoint}（p${m.after.page} ${m.after.side === 'right' ? '右' : '左'}）之後` : '在卷首';
+        row.innerHTML = `<span class="modern">${m.modern}</span><span style="width:210px">U+${m.codepoint} ${m.sequence}<br><small>${m.juan} · ${where}</small></span>`;
+        const b = document.createElement('button'); b.textContent = '在頁面上框選';
+        b.onclick = () => openLocate(m); row.append(b); sec.append(row);
+      }
+      root.append(sec);
+    }
+    if (todo.length) root.append(section('待確認：位置配上了但形狀相似度偏低，未進字型', todo, false));
+  }
+  if (filter !== 'todo') {
+    const groups = new Map();
+    for (const x of g) {
+      if (x.status === 'inferred') continue;
+      if (filter === 'open' && x.status === 'approved') continue;
+      const key = `${x.juan} 第 ${x.radical} 部`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(x);
+    }
+    for (const [key, items] of groups) root.append(section(key, items, true));
+  }
+  updateApprove();
+}
+
+// Every unlocked glyph of the whole book below the similarity bound, worst first.
+// ✓ locks an aligned glyph at once (or confirms the crop of an unconfirmed one);
+// ✗ records "this crop is not this character" for the next re-alignment.
+function renderLow(root) {
+  const max = +$('#lowmax').value || 0.8, per = 120;
+  const items = S.glyphs.filter(x => (!commonOnly || x.common) && (x.status !== 'approved' || judged.has(x.codepoint)) && (x.status === 'inferred' || +x.similarity < max))
+    .sort((a, b) => +a.similarity - +b.similarity);
+  const pages = Math.max(1, Math.ceil(items.length / per)); lowPage = Math.min(lowPage, pages - 1);
+  const left = items.filter(x => !judged.has(x.codepoint)).length;
+  const bar = document.createElement('h2');
+  bar.innerHTML = `低信心總覽 <small>${items.length} 字${commonOnly ? '（常用字）' : ''}，尚未判斷 ${left}；第 ${lowPage + 1} / ${pages} 頁　✓ 對（鎖定）　✗ 不是這個字　點圖可調框或改字</small>`;
+  for (const [text, step] of [['上一頁', -1], ['下一頁', 1]]) {
+    const b = document.createElement('button'); b.textContent = text; b.disabled = lowPage + step < 0 || lowPage + step >= pages;
+    b.onclick = () => { lowPage += step; render(); scrollTo(0, 0); }; bar.append(b);
+  }
+  const grid = document.createElement('div'); grid.className = 'grid';
+  for (const x of items.slice(lowPage * per, (lowPage + 1) * per)) {
+    const c = card(x, false), verdict = judged.get(x.codepoint);
+    c.querySelectorAll('button').forEach(b => b.remove());
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;margin-top:5px';
+    const mark = v => { judged.set(x.codepoint, v); c.style.opacity = 0.45; c.style.outline = `3px solid ${v === 'ok' ? '#2a7' : '#c33'}`; };
+    if (verdict) mark(verdict);
+    const where = {codepoint: x.codepoint, commons_title: x.commons_title, page: +x.page, side: x.side, x: +x.x, y: +x.y, w: +x.w, h: +x.h};
+    const yes = document.createElement('button'); yes.textContent = '✓ 對'; yes.style.cssText = 'flex:1;padding:4px';
+    yes.onclick = async e => { e.stopPropagation(); mark('ok');
+      if (x.status === 'inferred') await post('/api/feedback', {...where, action: 'rebox', note: '審核：切片正確'});
+      else { await post('/api/approve', {codepoints: [x.codepoint]}); x.status = 'approved'; } };
+    const no = document.createElement('button'); no.textContent = '✗ 不是'; no.style.cssText = 'flex:1;padding:4px';
+    no.onclick = async e => { e.stopPropagation(); mark('bad'); await post('/api/feedback', {...where, action: 'delete', note: '審核：不是這個字'}); };
+    row.append(yes, no); c.append(row); grid.append(c);
+  }
+  const sec = document.createElement('section'); sec.append(bar, grid); root.append(sec);
+}
+
+function section(title, items, selectable) {
+  const sec = document.createElement('section');
+  const h = document.createElement('h2'); h.innerHTML = `${title} <small>${items.length} 字</small>`;
+  if (selectable) {
+    const open = items.filter(x => x.status !== 'approved' && x.has_glyph);
+    if (open.length) {
+      const b = document.createElement('button'); b.textContent = `全選本部未鎖定 (${open.length})`;
+      b.onclick = () => { const all = open.every(x => selected.has(x.codepoint)); open.forEach(x => all ? selected.delete(x.codepoint) : selected.add(x.codepoint)); render(); };
+      h.append(b);
+    }
+  }
+  sec.append(h);
+  const grid = document.createElement('div'); grid.className = 'grid';
+  for (const x of items) grid.append(card(x, selectable));
+  sec.append(grid); return sec;
+}
+
+function card(x, selectable) {
+  const c = document.createElement('div');
+  c.className = `card ${x.status}` + (selected.has(x.codepoint) ? ' selected' : '');
+  const glyph = x.has_glyph ? `<img class="glyph" src="/glyph/u${x.codepoint}.svg?t=${x.x},${x.y},${x.w},${x.h}" alt="">` : '<span style="width:76px;text-align:center;color:#b0a890">未入字型</span>';
+  c.innerHTML = `<div class="pair">${glyph}<img loading="lazy" src="${cropUrl(x, 6, 1)}" alt=""></div>
+    <div class="meta"><span class="modern">${x.modern}</span><span>U+${x.codepoint}<br>p${x.page}${x.side === 'right' ? '右' : '左'} · ${x.similarity}</span></div>`;
+  if (x.status === 'approved') c.insertAdjacentHTML('beforeend', '<span class="badge">已鎖定</span>');
+  if (selectable && x.status !== 'approved' && x.has_glyph) {
+    const box = document.createElement('input'); box.type = 'checkbox'; box.checked = selected.has(x.codepoint);
+    box.onclick = e => { e.stopPropagation(); box.checked ? selected.add(x.codepoint) : selected.delete(x.codepoint); c.classList.toggle('selected', box.checked); updateApprove(); };
+    c.append(box);
+  }
+  if (x.status === 'inferred') {
+    const ok = document.createElement('button'); ok.textContent = '✓ 切片正確'; ok.style.cssText = 'width:100%;margin-top:5px;padding:2px';
+    ok.onclick = async e => { e.stopPropagation();
+      await post('/api/feedback', {codepoint: x.codepoint, action: 'rebox', commons_title: x.commons_title, page: +x.page, side: x.side, x: +x.x, y: +x.y, w: +x.w, h: +x.h, note: '審核：切片正確'});
+      ok.textContent = '已記錄（重建後生效）'; ok.disabled = true; };
+    c.append(ok);
+  }
+  c.onclick = () => openGlyph(x);
+  return c;
+}
+
+function updateApprove() { const b = $('#approve'); b.disabled = !selected.size; b.textContent = `批准並鎖定所選 (${selected.size})`; }
+
+// ---- dialog with an editable box over a page crop
+const rect = $('#rect'), stage = $('#stage');
+function showRect() {
+  const b = ctx.box; rect.hidden = !b; $('#d-box').textContent = b ? `${b.x},${b.y},${b.w},${b.h}` : '（尚未框選：在圖上拖拉）';
+  $('#d-save').disabled = !b; if (!b) return;
+  rect.style.left = (b.x - ctx.view.x0) * ctx.scale + 'px'; rect.style.top = (b.y - ctx.view.y0) * ctx.scale + 'px';
+  rect.style.width = b.w * ctx.scale + 'px'; rect.style.height = b.h * ctx.scale + 'px';
+}
+function loadStage() {
+  const v = ctx.view; $('#stageimg').src = `/crop?title=${encodeURIComponent(ctx.title)}&page=${ctx.page}&side=${ctx.side}&x0=${v.x0}&y0=${v.y0}&x1=${v.x1}&y1=${v.y1}&scale=${ctx.scale}`;
+  $('#d-info').textContent = `p${ctx.page} ${ctx.side === 'right' ? '右' : '左'}半葉` + (ctx.extra ? ' · ' + ctx.extra : ''); showRect();
+}
+function openGlyph(x) {
+  const b = {x: +x.x, y: +x.y, w: +x.w, h: +x.h};
+  ctx = {mode: 'glyph', glyph: x, title: x.commons_title, page: +x.page, side: x.side, scale: 3, box: b,
+         view: {x0: Math.max(0, b.x - 110), y0: Math.max(0, b.y - 130), x1: b.x + b.w + 110, y1: b.y + b.h + 130},
+         extra: `${x.status} · 相似度 ${x.similarity} · ${x.kind}`};
+  $('#d-title').innerHTML = `${x.modern} <small>U+${x.codepoint} ${x.sequence}</small>`;
+  $('#d-more').hidden = false; $('#d-nav').hidden = true; $('#d-unlock').hidden = x.status !== 'approved';
+  $('#d-save').textContent = '儲存調整後的邊框'; $('#d-note').value = ''; $('#d-new').value = '';
+  loadStage(); $('#dialog').showModal();
+}
+function openLocate(m) {
+  const at = m.after ? S.halves.findIndex(h => h.commons_title === m.after.commons_title && h.page === m.after.page && h.side === m.after.side) : 0;
+  ctx = {mode: 'locate', missing: m, index: Math.max(0, at), scale: 0.8, box: null};
+  $('#d-title').innerHTML = `${m.modern} <small>U+${m.codepoint} ${m.sequence}</small>`;
+  $('#d-more').hidden = true; $('#d-nav').hidden = false; $('#d-save').textContent = '就是這裡（加入這個字）'; $('#d-note').value = '';
+  gotoHalf(0); $('#dialog').showModal();
+}
+function gotoHalf(step) {
+  ctx.index = Math.min(S.halves.length - 1, Math.max(0, ctx.index + step));
+  const h = S.halves[ctx.index]; ctx.title = h.commons_title; ctx.page = h.page; ctx.side = h.side; ctx.box = null;
+  ctx.view = {x0: 0, y0: h.top - 30, x1: 1000, y1: h.bottom + 30};
+  ctx.extra = ctx.missing.after ? `應在 U+${ctx.missing.after.codepoint} 之後` : ''; loadStage();
+}
+$('#d-prev').onclick = () => gotoHalf(-1); $('#d-next').onclick = () => gotoHalf(1);
+
+let drag = null;
+stage.onmousedown = e => {
+  const r = stage.getBoundingClientRect(), px = (e.clientX - r.left) / ctx.scale + ctx.view.x0, py = (e.clientY - r.top) / ctx.scale + ctx.view.y0;
+  const handle = e.target.tagName === 'I' ? e.target.className : null;
+  if (handle) drag = {kind: handle, start: {...ctx.box}};
+  else if (e.target === rect) drag = {kind: 'move', px, py, start: {...ctx.box}};
+  else { ctx.box = {x: Math.round(px), y: Math.round(py), w: 1, h: 1}; drag = {kind: 'se', start: {...ctx.box}}; }
+  e.preventDefault();
+};
+window.onmousemove = e => {
+  if (!drag) return;
+  const r = stage.getBoundingClientRect(), px = Math.round((e.clientX - r.left) / ctx.scale + ctx.view.x0), py = Math.round((e.clientY - r.top) / ctx.scale + ctx.view.y0);
+  const s = drag.start; let x0 = s.x, y0 = s.y, x1 = s.x + s.w, y1 = s.y + s.h;
+  if (drag.kind === 'move') { const dx = px - Math.round(drag.px), dy = py - Math.round(drag.py); x0 += dx; x1 += dx; y0 += dy; y1 += dy; }
+  if (drag.kind.includes('n')) y0 = py; if (drag.kind.includes('s') && drag.kind !== 'move') y1 = py;
+  if (drag.kind.includes('w')) x0 = px; if (drag.kind.includes('e') && drag.kind !== 'move') x1 = px;
+  ctx.box = {x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.max(2, Math.abs(x1 - x0)), h: Math.max(2, Math.abs(y1 - y0))};
+  showRect();
+};
+window.onmouseup = () => { drag = null; };
+
+async function send(action, extra = {}) {
+  const x = ctx.glyph, b = ctx.box || (x && {x: x.x, y: x.y, w: x.w, h: x.h}) || {};
+  const res = await post('/api/feedback', {codepoint: x ? x.codepoint : ctx.missing.codepoint, action, commons_title: ctx.title, page: ctx.page, side: ctx.side,
+    x: b.x, y: b.y, w: b.w, h: b.h, note: $('#d-note').value, ...extra});
+  if (res.error) { toast(res.error); return; }
+  toast('已記錄；按「重新對位並重建」後生效'); $('#dialog').close();
+}
+$('#d-save').onclick = () => send(ctx.mode === 'locate' ? 'locate' : 'rebox');
+$('#d-delete').onclick = () => { const x = ctx.glyph; ctx.box = {x: +x.x, y: +x.y, w: +x.w, h: +x.h}; send('delete'); };
+$('#d-reassign').onclick = () => { const v = $('#d-new').value.trim(); if (!v) return toast('請輸入字或碼位'); const x = ctx.glyph; ctx.box = {x: +x.x, y: +x.y, w: +x.w, h: +x.h}; send('reassign', {new_codepoint: v}); };
+$('#d-comment').onclick = () => { if (!$('#d-note').value.trim()) return toast('請先寫意見'); send('comment'); };
+$('#d-unlock').onclick = async () => { await post('/api/unapprove', {codepoints: [ctx.glyph.codepoint]}); toast('已解除鎖定'); $('#dialog').close(); load(); };
+$('#d-close').onclick = () => $('#dialog').close();
+
+$('#approve').onclick = async () => {
+  const res = await post('/api/approve', {codepoints: [...selected]});
+  toast(`已鎖定 ${res.approved} 個字`); selected.clear(); load();
+};
+$('#rebuild').onclick = async () => { await post('/api/rebuild', {juan}); toast(`開始重建 ${juan}，需要幾分鐘`); setTimeout(load, 800); };
+$('#lowmax').onchange = () => { lowPage = 0; render(); };
+$('#juan').onchange = e => { juan = e.target.value; selected.clear(); render(); };
+$('#common').onchange = e => { commonOnly = e.target.checked; render(); };
+$('#pick').onclick = () => {
+  if (filter === 'todo') { filter = 'open'; document.querySelectorAll('#filter button').forEach(b => b.classList.toggle('on', b.dataset.f === 'open')); }
+  let n = 0;
+  for (const x of S.glyphs.filter(shown)) if (x.status !== 'approved' && x.status !== 'inferred' && x.has_glyph && +x.similarity >= 0.9) { selected.add(x.codepoint); n++; }
+  render(); toast(`已勾選 ${n} 個；掃一眼，取消不對的，再按批准`);
+};
+$('#filter').onclick = e => { if (!e.target.dataset.f) return; filter = e.target.dataset.f; document.querySelectorAll('#filter button').forEach(b => b.classList.toggle('on', b === e.target)); render(); };
+load();
+</script>
+</html>
