@@ -34,6 +34,9 @@ TRACE_HEIGHT = 600          # pixels the crop is enlarged to before thresholding
 MARGIN = 16                 # source pixels kept around the crop box, so a tight box does not clip strokes
 MAX_FACTOR = 8.0
 RULE_WIDTH, RULE_COVER, RULE_ZONE = 3.4, 0.4, 0.15  # scan pixels (rules are 2–3, strokes 5.5–8), of the box height, of the box width
+THROUGH = 0.9  # of the crop: a line this long is a rule or frame line; a full-height stroke reaches about 0.76
+UNDER_FRAME = 28  # scan pixels, half a slot: a box starting this close under the frame is a headword's
+RULE_TALL = 0.7  # of the box height: a thin line this tall is a rule even if it stops at the box
 RULE_BEYOND = 0.3  # of the margin rows above and below the box
 REACH = 8                   # source pixels beyond the box within which stroke ends are still kept
 TRACED = ("aligned", "manual", "approved")  # `inferred` pairs wait for a human decision
@@ -97,7 +100,8 @@ def remove_side_rules(mask, factor, inner):
     # unlike a stroke of the seal, a rule goes on above or below the box
     outside = np.r_[thin[:y0], thin[y1:]]
     beyond = np.convolve(outside.sum(0), np.ones(width), mode="same") / max(1, len(outside))
-    for x in np.flatnonzero((cover >= RULE_COVER) & (beyond >= RULE_BEYOND)):
+    # ... or it is as tall as the box itself, which no stroke this thin is
+    for x in np.flatnonzero(((cover >= RULE_COVER) & (beyond >= RULE_BEYOND)) | (cover >= RULE_TALL)):
         if x <= inner[0] + side or x >= inner[2] - side:
             band = slice(max(0, x - width), x + width + 1)
             mask[:, band][thin[:, band]] = 0
@@ -108,6 +112,15 @@ def crop_mask(row):
     half = half_leaf(row["edition"], row["commons_title"], int(row["page"]), int(row["render_width"]),
                      int(row["crop_x0"]), int(row["crop_x1"]), float(row["rotation"]))
     x, y, w, h = (int(row[k]) for k in "xywh")
+    # A headword hangs right under the top frame line, and the segmenter, which
+    # blanks the rows next to the frame, can start its box below the seal's
+    # first stroke (the short top stroke of 示). Whatever lies between the
+    # frame and such a box belongs to the seal: take the box up to the frame.
+    frame_top = int(row["frame_top"]) if row.get("frame_top") else None
+    box_top = y
+    if frame_top is not None and 0 < y - frame_top <= UNDER_FRAME and row["codepoint"] not in keep_lines():  # those keep every line, the frame too
+        h += y - (frame_top + 1)
+        y = frame_top + 1
     x0, y0 = max(0, x - MARGIN), max(0, y - MARGIN)
     crop = half[y0:y + h + MARGIN, x0:x + w + MARGIN]
     factor = min(TRACE_HEIGHT / crop.shape[0], MAX_FACTOR)  # flat seals such as 一 would explode
@@ -121,7 +134,7 @@ def crop_mask(row):
     # Column rules and frame lines run through the crop from edge to edge;
     # no seal stroke does, because of the margin kept around the box.
     for horizontal in (() if row["codepoint"] in keep_lines() else (False, True)):
-        length = int((mask.shape[1] if horizontal else mask.shape[0]) * 0.95)
+        length = int((mask.shape[1] if horizontal else mask.shape[0]) * THROUGH)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (length, 1) if horizontal else (1, length))
         lines = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         if lines.any():
@@ -131,7 +144,8 @@ def crop_mask(row):
     stroke = 2 * float(np.median(distance[distance > 0.5 * distance.max()])) if distance.max() > 0 else 1.0
     inner = np.array([x - x0, y - y0, x - x0 + w, y - y0 + h]) * factor
     if row["codepoint"] not in keep_lines():
-        remove_side_rules(mask, factor, inner)
+        # judged against the segmenter's box: in the strip taken in under the frame a rule simply goes on
+        remove_side_rules(mask, factor, np.array([inner[0], (box_top - y0) * factor, inner[2], inner[3]]))
     # Ink further than REACH from the box is never part of the seal; cutting it
     # first also severs strokes from a frame line they happen to touch.
     reach = np.zeros(mask.shape, bool)
@@ -148,7 +162,10 @@ def crop_mask(row):
     for i in range(1, count):
         component = labels == i
         mostly_inside = (component & inside).sum() >= 0.5 * stats[i, cv2.CC_STAT_AREA]
-        if stats[i, cv2.CC_STAT_AREA] < stroke * stroke * 0.3 or not mostly_inside:
+        # in the strip taken in under the frame, a sliver of the sagging frame line is thinner than any stroke
+        thin = RULE_WIDTH * factor * (1.5 if stats[i, cv2.CC_STAT_WIDTH] >= 0.85 * (ix1 - ix0) else 1.2)  # a long sliver sags more
+        sliver = stats[i, cv2.CC_STAT_TOP] < (box_top - y0) * factor - 1 and stats[i, cv2.CC_STAT_HEIGHT] <= thin
+        if stats[i, cv2.CC_STAT_AREA] < stroke * stroke * 0.3 or not mostly_inside or sliver:
             mask[component] = 0
     return mask, factor, stroke
 
