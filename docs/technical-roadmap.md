@@ -312,3 +312,36 @@ codepoint,action,edition,commons_title,page,x,y,w,h,reason
 2. **可能的合作**：把審核中發現的刻本字形疑點整理出來，供其他字型的作者參考；若其他字型日後支援篆書區塊，可互相對照品質。
 3. **與 OpenCC 同步**：一個現代漢字對應哪個篆書碼位，與 OpenCC `SealCharacters.txt`／`SealVariants.txt` 一致；兩個專案共用 `SealSources.txt`。
 
+## 附錄三：陳昌治本所缺的 238 個碼位（2026-09-21 調查，尚未動工）
+
+起因：試排頁（`app/`）輸入「皇」得到紅框。opencc-js／OpenCC 把「皇」轉成 U+3D06C，而 U+3D06C 沒有
+`kSEAL_CCZSrc`：陳昌治本這個位置的字頭是从自王的 𦤃（U+3D06B，已對位），「皇」這個字形只見於別的版本
+（`D-00098`、`TH-Y007`）。這不是切字或對位的錯，是主底本本來就沒有。
+
+### 數字（由 `SealSources.txt` 算出）
+
+- 沒有 `kSEAL_CCZSrc` 的碼位共 238 個。依可用的其他來源分：
+
+  | 來源 | 碼位數 |
+  | --- | --- |
+  | 只有 `kSEAL_DYCSrc`（段注本） | 149 |
+  | `kSEAL_DYCSrc` 與 `kSEAL_QJZSrc` 都有 | 44 |
+  | 只有 `kSEAL_QJZSrc` | 42 |
+  | 兩者皆無，只有 `kSEAL_THXSrc` | 3（U+3F4ED 𡪚、U+3F6BB 𣓡、U+3F807 𧓹） |
+
+- 這 238 個碼位的 `kSEAL_THXSrc` 有 231 個是 `TH-Y…` 編號（不在 THX 的主流水號裡），只有 7 個是一般的 `TH-0…`。
+- 對應楷書屬常用字（Big5 常用字區）的有 33 個：皇、噬、邁、謀、皮、第、豆、餒、欄、柙、袞、亮、免、焚、熾、
+  慈、浙、潯、滋、池、濂、挾、拯、摻、妥、民、彆、由、蠡、恆、勞、孳、申。這些是優先要補的。
+
+### 做法（待辦）
+
+1. 先做段注本（DYC）：一個版本就能補 193 個；再用 QJZ 補 42 個；最後 3 個看 THX。
+2. 在 `sources/manifest.yaml` 加第二個 edition：選定 Commons 上的公版掃描（§10 仍待決定），核定卷頁範圍。
+   段注本的版式與陳昌治本不同（注文雙行小字多、篆字未必一篆一行），`segment_pages.py` 的欄格與篆字偵測規則
+   要另外調；`chart_reference.py` 已能依 `sequence_prefix` 取該版本在碼表上的參考形（`D-`）。
+3. 不必整本對位：只需要這 238 個流水號。可以整卷切字後照常用形狀對位，但只輸出目標碼位的列；
+   `data/provenance/glyphs.csv` 的 `edition` 欄記下回退的版本（AGENTS.md 的底本規則要求記錄回退）。
+4. 重新計算這份清單：取 `SealSources.txt` 中沒有 `kSEAL_CCZSrc` 的碼位即可，不另存檔。
+
+在補齊之前，這些碼位在字型裡是空缺：試排頁以紅色虛線框標示，`build_font.py --require-complete` 會失敗。
+
