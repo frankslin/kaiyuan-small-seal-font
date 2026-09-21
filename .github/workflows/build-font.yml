@@ -42,8 +42,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install fontTools and Pillow
-        run: pip install "fonttools>=4.50" "Pillow>=10.0"
+      - name: Install fontTools, brotli and Pillow
+        run: pip install "fonttools>=4.50" "brotli>=1.1" "Pillow>=10.0"
       - name: Verify the vendored SealSources.txt
         run: python scripts/verify_seal_sources.py
       - name: Build
@@ -66,7 +66,7 @@ jobs:
       - name: Collect the files
         run: |
           mkdir -p dist/KaiyuanSmallSeal
-          cp build/KaiyuanSmallSeal*-Regular.ttf build/KaiyuanSmallSeal*-Regular.otf dist/KaiyuanSmallSeal/
+          cp build/KaiyuanSmallSeal*-Regular.ttf build/KaiyuanSmallSeal*-Regular.otf build/KaiyuanSmallSeal*-Regular.woff2 dist/KaiyuanSmallSeal/
           cp OFL.txt THIRD_PARTY_NOTICES.md build/specimen.png dist/KaiyuanSmallSeal/
       - uses: actions/upload-artifact@v4
         with:
@@ -91,4 +91,4 @@ jobs:
         run: |
           zip -r "KaiyuanSmallSeal-${GITHUB_REF_NAME}.zip" KaiyuanSmallSeal
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes \
-            "KaiyuanSmallSeal-${GITHUB_REF_NAME}.zip" KaiyuanSmallSeal/*.ttf KaiyuanSmallSeal/*.otf
+            "KaiyuanSmallSeal-${GITHUB_REF_NAME}.zip" KaiyuanSmallSeal/*.ttf KaiyuanSmallSeal/*.otf KaiyuanSmallSeal/*.woff2

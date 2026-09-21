@@ -10,12 +10,15 @@ headword) wins, unless data/compat_prefer.txt says otherwise (lines of
 Pure fontTools; no FontForge. While the glyph set is incomplete the build
 reports coverage and succeeds; pass --require-complete for release builds.
 
+Each TTF also gets a WOFF2 web font (needs the `brotli` package; --no-woff2 skips it).
+
 Usage:
     python3 scripts/build_font.py
     python3 scripts/build_font.py --require-complete
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -29,6 +32,7 @@ from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.svgLib.path import parse_path
+from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parent.parent  # no import from the scan stages: CI builds with fontTools alone
 
@@ -104,7 +108,7 @@ def name_strings(family, local, version):
             "licenseInfoURL": "https://openfontlicense.org"}
 
 
-def build(outlines, cmap, family, local, version, stem, modern=False):
+def build(outlines, cmap, family, local, version, stem, modern=False, woff2=True):
     order = [".notdef"] + sorted(outlines)
     metrics = {name: (UPM, 0) for name in order}
     names = name_strings(family, local, version)
@@ -142,12 +146,18 @@ def build(outlines, cmap, family, local, version, stem, modern=False):
         path = BUILD / f"{stem}.{'ttf' if is_ttf else 'otf'}"
         fb.save(path)
         print(f"wrote {path.relative_to(ROOT)}  ({len(order) - 1} glyphs, {len(cmap)} mapped code points)")
+        if is_ttf and woff2:  # the web font: the TrueType flavour compresses better than CFF (about 10 MB against 23)
+            web = TTFont(path)
+            web.flavor = "woff2"
+            web.save(path.with_suffix(".woff2"))
+            print(f"wrote {path.with_suffix('.woff2').relative_to(ROOT)}  ({path.with_suffix('.woff2').stat().st_size / 1e6:.1f} MB)")
 
 
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--version", default="0.001")
     parser.add_argument("--require-complete", action="store_true")
+    parser.add_argument("--no-woff2", action="store_true", help="skip the web fonts (they take about a minute each)")
     args = parser.parse_args(argv)
 
     outlines = load_glyphs()
@@ -181,9 +191,18 @@ def main(argv):
 
     BUILD.mkdir(exist_ok=True)
     primary = {int(name[1:], 16): name for name in outlines}
-    build(outlines, primary, FAMILY, FAMILY_LOCAL, args.version, "KaiyuanSmallSeal-Regular")
+    # which code points have a glyph so far, for app/ and other tools that must not show a blank
+    (BUILD / "coverage.json").write_text(json.dumps(sorted(f"{cp:05X}" for cp in primary)), encoding="utf-8")
+    woff2 = not args.no_woff2
+    if woff2:
+        try:
+            import brotli  # noqa: F401  (fontTools needs it to write WOFF2)
+        except ImportError:
+            print("no WOFF2: pip install brotli", file=sys.stderr)
+            woff2 = False
+    build(outlines, primary, FAMILY, FAMILY_LOCAL, args.version, "KaiyuanSmallSeal-Regular", woff2=woff2)
     build(outlines, modern_map(set(outlines)), FAMILY + " Compat", COMPAT_LOCAL, args.version,
-          "KaiyuanSmallSealCompat-Regular", modern=True)
+          "KaiyuanSmallSealCompat-Regular", modern=True, woff2=woff2)
     return 0
 
 
