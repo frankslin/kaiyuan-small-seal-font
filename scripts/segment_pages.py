@@ -35,7 +35,7 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from fetch_pages import CACHE, MANIFEST, ROOT, slugify
+from fetch_pages import CACHE, MANIFEST, ROOT, parse_page_arg, slugify
 
 BUILD = ROOT / "build"
 SLOTS_PER_COLUMN = 22
@@ -644,6 +644,7 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--edition", default="ccz")
     parser.add_argument("--juan", help="only these 卷 (as named in the manifest, comma-separated)")
+    parser.add_argument("--pages", help="only these PDF page numbers, e.g. 25,47,50")
     parser.add_argument("--overlay", action="store_true", help="write review overlays next to the JSON")
     parser.add_argument("--threshold", type=float, default=0.8)
     parser.add_argument("--no-feedback", action="store_true",
@@ -651,14 +652,25 @@ def main(argv):
     args = parser.parse_args(argv)
 
     manifest = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
+    only_pages = parse_page_arg(args.pages)
     halves = {}  # (slug, page, side) -> state, in reading order
     gutters = {}
     for entry, block in manifest_blocks(manifest, args.edition, args.juan):
+        if only_pages is not None and not any(
+                p in only_pages for p in range(block["first"], block["last"] + 1)):
+            continue  # this 卷 block holds none of the requested pages
         slug = slugify(entry["commons_title"])
         width = entry.get("render_width") or manifest.get("default_render_width")
         for page, side in block_halves(entry, block):
+            if only_pages is not None and page not in only_pages:
+                continue
             path = CACHE / args.edition / slug / f"p{page:04d}-w{width}.jpg"
             if not path.exists():
+                if only_pages is not None:
+                    # --pages is a flat page list across volumes; a page that is
+                    # not cached for this entry was never fetched for it.
+                    print(f"skip {path.relative_to(ROOT)}: not fetched", file=sys.stderr)
+                    continue
                 print(f"missing {path.relative_to(ROOT)}; run fetch_pages.py", file=sys.stderr)
                 return 1
             gray = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
