@@ -208,7 +208,7 @@ def feedback(item):
 def run_rebuild():
     python = sys.executable
     steps = [["scripts/align_sequence.py", "--edition", "ccz", "--juan", rebuild["juan"]], ["scripts/trace_glyphs.py"],
-             ["scripts/build_font.py", "--no-woff2"]  # web fonts take minutes; not needed while reviewing, ["scripts/proof_sheets.py"]]
+             ["scripts/build_font.py", "--no-woff2"]]  # web fonts take minutes; not needed while reviewing; ["scripts/proof_sheets.py"] skipped
     rebuild["log"] = ""
     for step in steps:
         result = subprocess.run([python, *step], cwd=ROOT, capture_output=True, text=True)
