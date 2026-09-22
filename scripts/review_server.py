@@ -193,6 +193,8 @@ def feedback(item):
             "reason": f"review {now}: {item.get('note', '')}".strip()}
     if item["action"] == "delete":  # "this crop is not that seal"; it may still be another one
         lines = [{**base, "action": "not", "codepoint": item["codepoint"]}]
+    elif item["action"] == "reject":  # rejected detection with no code point: the box holds no seal
+        lines = [{**base, "action": "reject"}]
     elif item["action"] in ("rebox", "locate"):  # the box is this code point
         lines = [{**base, "action": "assign", "codepoint": item["codepoint"]}]
     elif item["action"] == "reassign":
